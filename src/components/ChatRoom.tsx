@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { AgentMessage, AGENTS } from '@/lib/types';
 import { AgentMessageItem } from './AgentMessageItem';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -9,15 +9,35 @@ interface ChatRoomProps {
     messages: AgentMessage[];
     isGenerating: boolean;
     currentRound: number;
+    onSendMessage?: (message: string) => void;
+    canSendMessage?: boolean;
 }
 
-export function ChatRoom({ messages, isGenerating, currentRound }: ChatRoomProps) {
+export function ChatRoom({
+    messages,
+    isGenerating,
+    currentRound,
+    onSendMessage,
+    canSendMessage = false
+}: ChatRoomProps) {
     const bottomRef = useRef<HTMLDivElement>(null);
+    const [inputValue, setInputValue] = useState('');
 
     // 새 메시지가 추가되면 스크롤
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (inputValue.trim() && onSendMessage && !isGenerating) {
+            onSendMessage(inputValue.trim());
+            setInputValue('');
+        }
+    };
+
+    // USER를 제외한 AI 에이전트만 표시
+    const aiAgents = Object.values(AGENTS).filter(agent => agent.id !== 'USER');
 
     return (
         <div className="bg-gray-900 rounded-xl flex flex-col h-[600px]">
@@ -34,7 +54,7 @@ export function ChatRoom({ messages, isGenerating, currentRound }: ChatRoomProps
 
                 {/* 에이전트 목록 */}
                 <div className="flex items-center gap-2">
-                    {Object.values(AGENTS).map((agent) => (
+                    {aiAgents.map((agent) => (
                         <div
                             key={agent.id}
                             className="w-8 h-8 rounded-full flex items-center justify-center text-sm"
@@ -83,6 +103,43 @@ export function ChatRoom({ messages, isGenerating, currentRound }: ChatRoomProps
 
                 <div ref={bottomRef} />
             </div>
+
+            {/* 사용자 입력창 */}
+            <form onSubmit={handleSubmit} className="p-4 border-t border-gray-700">
+                <div className="flex gap-3">
+                    <input
+                        type="text"
+                        value={inputValue}
+                        onChange={(e) => setInputValue(e.target.value)}
+                        placeholder={
+                            !canSendMessage
+                                ? "파일을 업로드하면 토론에 참여할 수 있습니다"
+                                : isGenerating
+                                    ? "에이전트들이 토론 중입니다..."
+                                    : "의견을 입력하세요 (예: 후킹을 더 강하게 해주세요)"
+                        }
+                        disabled={!canSendMessage || isGenerating}
+                        className="flex-1 bg-gray-800 text-white rounded-lg px-4 py-3
+                                 placeholder-gray-500 border border-gray-700
+                                 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500
+                                 disabled:opacity-50 disabled:cursor-not-allowed"
+                    />
+                    <button
+                        type="submit"
+                        disabled={!canSendMessage || isGenerating || !inputValue.trim()}
+                        className="px-6 py-3 bg-amber-500 text-white rounded-lg font-medium
+                                 hover:bg-amber-600 transition-colors
+                                 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-amber-500"
+                    >
+                        전송
+                    </button>
+                </div>
+                {canSendMessage && !isGenerating && (
+                    <p className="text-xs text-gray-500 mt-2">
+                        💡 토론 중 의견을 내거나, 대본 완성 후 수정 요청을 할 수 있습니다
+                    </p>
+                )}
+            </form>
         </div>
     );
 }

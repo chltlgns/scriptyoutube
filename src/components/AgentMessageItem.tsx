@@ -12,7 +12,7 @@ export function AgentMessageItem({ message }: AgentMessageItemProps) {
 
     // 멘션 하이라이팅
     const formatContent = (content: string) => {
-        return content.replace(/@(SPEC|REVIEW|STYLE|BOSS)(_AGENT)?/g, (match) => {
+        return content.replace(/@(SPEC|REVIEW|STYLE|BOSS|USER)(_AGENT)?/g, (match) => {
             const agentId = match.replace('@', '').replace('_AGENT', '') as keyof typeof AGENTS;
             if (AGENTS[agentId]) {
                 return `<span class="text-${agentId.toLowerCase()}-highlight font-semibold">@${AGENTS[agentId].name}</span>`;
@@ -20,6 +20,9 @@ export function AgentMessageItem({ message }: AgentMessageItemProps) {
             return match;
         });
     };
+
+    // 사용자 메시지인지 확인
+    const isUserMessage = message.agentId === 'USER';
 
     return (
         <motion.div
@@ -99,6 +102,16 @@ export function AgentMessageItem({ message }: AgentMessageItemProps) {
                 {message.messageType === 'rebuttal' && (
                     <div className="mt-2 inline-block px-2 py-1 bg-orange-500/20 text-orange-400 text-xs rounded-full">
                         💭 반박
+                    </div>
+                )}
+                {message.messageType === 'user_input' && (
+                    <div className="mt-2 inline-block px-2 py-1 bg-amber-500/20 text-amber-400 text-xs rounded-full">
+                        💬 의견
+                    </div>
+                )}
+                {message.messageType === 'revision_request' && (
+                    <div className="mt-2 inline-block px-2 py-1 bg-purple-500/20 text-purple-400 text-xs rounded-full">
+                        ✏️ 수정 요청
                     </div>
                 )}
             </div>

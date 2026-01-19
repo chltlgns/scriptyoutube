@@ -21,9 +21,11 @@ export default function Home() {
   } = useConversationStore();
 
   const [inputFiles, setInputFiles] = useState<InputFiles | null>(null);
+  const [isStarted, setIsStarted] = useState(false);
 
   const handleFilesReady = async (files: InputFiles) => {
     setInputFiles(files);
+    setIsStarted(true);
     reset();
     setIsGenerating(true);
 
@@ -89,6 +91,71 @@ export default function Home() {
     }
   };
 
+  // 사용자 메시지 전송 핸들러
+  const handleSendMessage = async (content: string) => {
+    if (!inputFiles) return;
+
+    // 사용자 메시지 추가
+    const userMessage: AgentMessage = {
+      id: `user-${Date.now()}`,
+      agentId: 'USER',
+      content,
+      timestamp: new Date(),
+      messageType: finalScript ? 'revision_request' : 'user_input',
+    };
+    addMessage(userMessage);
+
+    setIsGenerating(true);
+
+    try {
+      // 현재 메시지 목록 가져오기
+      const currentMessages = useConversationStore.getState().messages;
+
+      // 수정 라운드 실행
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          inputFiles,
+          round: finalScript ? 4 : currentRound, // 수정 요청이면 라운드 4
+          previousMessages: currentMessages,
+          userFeedback: content,
+          isRevision: !!finalScript,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || '알 수 없는 오류');
+      }
+
+      const data = await response.json() as {
+        messages: AgentMessage[];
+        finalScript?: FinalScript;
+      };
+
+      // 메시지 순차 추가
+      for (const message of data.messages) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        addMessage({
+          ...message,
+          timestamp: new Date(message.timestamp),
+        });
+      }
+
+      // 최종 대본 업데이트
+      if (data.finalScript) {
+        setFinalScript(data.finalScript);
+      }
+
+    } catch (error) {
+      console.error('메시지 처리 오류:', error);
+      alert('메시지 처리 중 오류가 발생했습니다.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950">
       {/* 헤더 */}
@@ -122,6 +189,8 @@ export default function Home() {
               messages={messages}
               isGenerating={isGenerating}
               currentRound={currentRound}
+              onSendMessage={handleSendMessage}
+              canSendMessage={isStarted}
             />
           </div>
         </div>
@@ -130,7 +199,7 @@ export default function Home() {
       {/* 푸터 */}
       <footer className="border-t border-gray-800 mt-8">
         <div className="max-w-7xl mx-auto px-4 py-4 text-center text-gray-600 text-sm">
-          Powered by Google Gemini AI · 멀티에이전트 쇼츠 대본 생성 시스템
+          Powered by Claude AI · 멀티에이전트 쇼츠 대본 생성 시스템
         </div>
       </footer>
     </div>

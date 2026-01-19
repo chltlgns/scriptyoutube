@@ -1,27 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import Anthropic from '@anthropic-ai/sdk';
 import { AgentId, MessageType, AgentMessage, InputFiles } from '@/lib/types';
 import { ORCHESTRATOR_SYSTEM_PROMPT } from '@/lib/prompts';
 
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
-        const { inputFiles, round, previousMessages } = body as {
+        const { inputFiles, round, previousMessages, userFeedback, isRevision } = body as {
             inputFiles: InputFiles;
             round: number;
             previousMessages: AgentMessage[];
+            userFeedback?: string;
+            isRevision?: boolean;
         };
 
-        const apiKey = process.env.GOOGLE_API_KEY;
+        const apiKey = process.env.ANTHROPIC_API_KEY;
+        console.log('🔑 Anthropic API Key 사용 중:', apiKey ? `${apiKey.substring(0, 15)}...${apiKey.substring(apiKey.length - 4)}` : 'NOT SET');
+
         if (!apiKey) {
             return NextResponse.json(
-                { error: 'GOOGLE_API_KEY가 설정되지 않았습니다.' },
+                { error: 'ANTHROPIC_API_KEY가 설정되지 않았습니다.' },
                 { status: 500 }
             );
         }
 
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: 'gemini-3-pro-preview' });
+        const anthropic = new Anthropic({
+            apiKey: apiKey,
+        });
 
         // 이전 대화 포맷
         const previousConversation = previousMessages
@@ -30,7 +35,37 @@ export async function POST(request: NextRequest) {
 
         // 라운드별 지시
         let roundInstruction = '';
-        if (round === 1) {
+        if (userFeedback && isRevision) {
+            // 수정 요청 라운드
+            roundInstruction = `
+## 수정 요청 라운드
+프로듀서(USER)가 대본에 대한 수정 요청을 했습니다.
+
+### 프로듀서 피드백:
+"${userFeedback}"
+
+에이전트들은 이 피드백을 반영하여 토론하고, BOSS가 수정된 최종 대본을 작성합니다.
+- 각 에이전트가 피드백에 대한 의견을 1-2문장으로 공유
+- BOSS_AGENT가 피드백을 반영한 수정 대본 작성
+- messageType을 "final_script"로 설정
+
+반드시 3-4개의 메시지를 생성하세요. 마지막은 BOSS의 수정된 대본이어야 합니다.`;
+        } else if (userFeedback) {
+            // 토론 중 사용자 의견 반영
+            roundInstruction = `
+## 프로듀서 의견 반영 라운드
+프로듀서(USER)가 토론에 의견을 제시했습니다.
+
+### 프로듀서 의견:
+"${userFeedback}"
+
+에이전트들은 프로듀서의 의견을 고려하여 토론을 이어갑니다.
+- 프로듀서 의견에 대한 각 에이전트의 반응
+- 동의/반박/보완 의견 제시
+- @USER 멘션으로 프로듀서에게 직접 응답 가능
+
+반드시 2-3개의 메시지를 생성하세요.`;
+        } else if (round === 1) {
             roundInstruction = `
 ## Round 1: 초기 분석
 각 에이전트가 자신의 전문 영역에서 분석 결과를 공유합니다.
@@ -87,8 +122,19 @@ ${previousConversation}` : ''}
   {"agentId": "STYLE", "content": "스타일 제안...", "messageType": "opinion"}
 ]`;
 
-        const result = await model.generateContent(prompt);
-        const text = result.response.text();
+        const message = await anthropic.messages.create({
+            model: 'claude-opus-4-5-20251101',
+            max_tokens: 4096,
+            messages: [
+                {
+                    role: 'user',
+                    content: prompt,
+                },
+            ],
+        });
+
+        // 응답 텍스트 추출
+        const text = message.content[0].type === 'text' ? message.content[0].text : '';
 
         // JSON 파싱
         const jsonMatch = text.match(/\[[\s\S]*\]/);
@@ -117,12 +163,11 @@ ${previousConversation}` : ''}
                 mentions: m.mentions,
             }));
 
-            // Round 3에서 최종 대본 추출
+            // 최종 대본 추출 (Round 3 또는 수정 요청)
             let finalScript = null;
-            if (round === 3) {
+            if (round === 3 || isRevision) {
                 const bossMessage = messages.find(m => m.agentId === 'BOSS');
                 if (bossMessage) {
-                    // 간단히 대본 정보 파싱
                     finalScript = {
                         titles: extractTitles(bossMessage.content),
                         script: extractScript(bossMessage.content),
