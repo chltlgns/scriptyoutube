@@ -12,7 +12,7 @@ export function AgentMessageItem({ message }: AgentMessageItemProps) {
 
     // 멘션 하이라이팅
     const formatContent = (content: string) => {
-        return content.replace(/@(SPEC|REVIEW|STYLE|BOSS|USER)(_AGENT)?/g, (match) => {
+        return content.replace(/@(SPEC|REVIEW|STYLE|PRICE|BOSS|USER)(_AGENT)?/g, (match) => {
             const agentId = match.replace('@', '').replace('_AGENT', '') as keyof typeof AGENTS;
             if (AGENTS[agentId]) {
                 return `<span class="text-${agentId.toLowerCase()}-highlight font-semibold">@${AGENTS[agentId].name}</span>`;

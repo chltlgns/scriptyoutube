@@ -1,6 +1,6 @@
 // 타입 정의
 
-export type AgentId = 'SPEC' | 'REVIEW' | 'STYLE' | 'BOSS' | 'USER';
+export type AgentId = 'SPEC' | 'REVIEW' | 'STYLE' | 'PRICE' | 'BOSS' | 'USER';
 
 export interface Agent {
   id: AgentId;
@@ -31,6 +31,13 @@ export const AGENTS: Record<AgentId, Agent> = {
     icon: '✍️',
     color: '#8B5CF6', // purple
     role: '대본 스타일 코치',
+  },
+  PRICE: {
+    id: 'PRICE',
+    name: 'PRICE_AGENT',
+    icon: '💰',
+    color: '#EC4899', // pink
+    role: '쿠팡 가격 분석 전문가',
   },
   BOSS: {
     id: 'BOSS',
@@ -77,6 +84,8 @@ export interface InputFiles {
     purchaseCount: number;
     discountRate: number;
   };
+  priceImage?: string; // base64 encoded image
+  direction?: string; // 대본 작성 방향
 }
 
 export interface FinalScript {

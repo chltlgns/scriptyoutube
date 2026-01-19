@@ -18,9 +18,13 @@ export function FileUpload({ onFilesReady, isDisabled }: FileUploadProps) {
         discountRate: 0,
     });
     const [hasPriceData, setHasPriceData] = useState(false);
+    const [priceImage, setPriceImage] = useState<string>('');
+    const [priceImagePreview, setPriceImagePreview] = useState<string>('');
+    const [direction, setDirection] = useState<string>('');
 
     const productFileRef = useRef<HTMLInputElement>(null);
     const reviewFileRef = useRef<HTMLInputElement>(null);
+    const priceImageRef = useRef<HTMLInputElement>(null);
 
     const handleFileRead = (
         file: File,
@@ -33,6 +37,16 @@ export function FileUpload({ onFilesReady, isDisabled }: FileUploadProps) {
         reader.readAsText(file, 'UTF-8');
     };
 
+    const handleImageUpload = (file: File) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const base64 = e.target?.result as string;
+            setPriceImage(base64);
+            setPriceImagePreview(base64);
+        };
+        reader.readAsDataURL(file);
+    };
+
     const handleSubmit = () => {
         if (!productInfo || !reviews) {
             alert('제품 정보와 리뷰 파일을 모두 업로드해주세요.');
@@ -43,6 +57,8 @@ export function FileUpload({ onFilesReady, isDisabled }: FileUploadProps) {
             productInfo,
             reviews,
             priceData: hasPriceData ? priceData : undefined,
+            priceImage: priceImage || undefined,
+            direction: direction || undefined,
         });
     };
 
@@ -106,6 +122,65 @@ export function FileUpload({ onFilesReady, isDisabled }: FileUploadProps) {
                 </button>
             </div>
 
+            {/* 쿠팡 가격 이미지 (선택) */}
+            <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-300">
+                    💰 쿠팡 가격 캡처 이미지 (선택)
+                </label>
+                <input
+                    type="file"
+                    ref={priceImageRef}
+                    accept="image/*"
+                    onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleImageUpload(file);
+                    }}
+                    className="hidden"
+                />
+                <button
+                    onClick={() => priceImageRef.current?.click()}
+                    className={`w-full py-3 px-4 rounded-lg border-2 border-dashed transition-colors ${priceImage
+                            ? 'border-pink-500 bg-pink-500/10 text-pink-400'
+                            : 'border-gray-600 hover:border-pink-500 text-gray-400'
+                        }`}
+                >
+                    {priceImage ? '✅ 이미지 업로드됨' : '🖼️ 이미지 선택...'}
+                </button>
+                {priceImagePreview && (
+                    <div className="mt-2 relative">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                            src={priceImagePreview}
+                            alt="가격 캡처"
+                            className="rounded-lg w-full h-auto max-h-40 object-contain bg-gray-800"
+                        />
+                        <button
+                            onClick={() => {
+                                setPriceImage('');
+                                setPriceImagePreview('');
+                            }}
+                            className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm hover:bg-red-600"
+                        >
+                            ×
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            {/* 대본 작성 방향 (선택) */}
+            <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-300">
+                    🎯 대본 작성 방향 (선택)
+                </label>
+                <textarea
+                    value={direction}
+                    onChange={(e) => setDirection(e.target.value)}
+                    placeholder="예: 가성비를 강조해줘, 학생 타겟으로 작성해줘, 게이밍 성능을 메인으로..."
+                    className="w-full bg-gray-800 rounded-lg px-4 py-3 text-white text-sm placeholder-gray-500 border border-gray-700 focus:border-blue-500 focus:outline-none resize-none"
+                    rows={3}
+                />
+            </div>
+
             {/* 가격 데이터 (선택) */}
             <div className="space-y-2">
                 <label className="flex items-center gap-2 text-sm font-medium text-gray-300">
@@ -115,7 +190,7 @@ export function FileUpload({ onFilesReady, isDisabled }: FileUploadProps) {
                         onChange={(e) => setHasPriceData(e.target.checked)}
                         className="rounded"
                     />
-                    가격 추적 데이터 (선택)
+                    가격 추적 데이터 직접 입력 (선택)
                 </label>
 
                 {hasPriceData && (

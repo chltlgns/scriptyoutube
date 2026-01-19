@@ -35,6 +35,8 @@ export async function POST(request: NextRequest) {
 
         // 라운드별 지시
         let roundInstruction = '';
+        const hasPriceInfo = inputFiles.priceData || inputFiles.priceImage;
+
         if (userFeedback && isRevision) {
             // 수정 요청 라운드
             roundInstruction = `
@@ -69,9 +71,9 @@ export async function POST(request: NextRequest) {
             roundInstruction = `
 ## Round 1: 초기 분석
 각 에이전트가 자신의 전문 영역에서 분석 결과를 공유합니다.
-순서: SPEC → REVIEW → STYLE
+순서: SPEC → REVIEW → ${hasPriceInfo ? 'PRICE → ' : ''}STYLE
 각 에이전트는 2-3문단으로 핵심 분석을 공유하세요.
-반드시 3개의 메시지를 생성하세요.`;
+반드시 ${hasPriceInfo ? '4' : '3'}개의 메시지를 생성하세요.`;
         } else if (round === 2) {
             roundInstruction = `
 ## Round 2: 토론 및 반박
@@ -79,6 +81,7 @@ export async function POST(request: NextRequest) {
 - @멘션으로 다른 에이전트에게 의견 제시
 - 동의, 반박, 보완 의견 교환
 - 후킹과 핵심 포인트 결정을 위해 토론
+${hasPriceInfo ? '- PRICE 에이전트의 가격 분석을 후킹에 활용할지 토론' : ''}
 반드시 3-4개의 메시지를 생성하세요.`;
         } else {
             roundInstruction = `
@@ -88,12 +91,22 @@ BOSS_AGENT가 토론을 정리하고 최종 대본을 작성합니다.
 - 40초 분량 최종 대본 작성 (약 180자)
 - 제목 후보 3개 제안
 - 타겟 시청자 명시
+${hasPriceInfo ? '- 가격 관련 후킹 포함 (예: "지금 이 가격 아니면 못 삼")' : ''}
 BOSS만 발언하고, messageType을 "final_script"로 설정하세요.`;
         }
+
+        // 방향 설정이 있으면 추가
+        const directionInstruction = inputFiles.direction ? `
+## 🎯 프로듀서 요청 방향
+"${inputFiles.direction}"
+위 방향을 우선적으로 반영하여 대본을 작성하세요.
+` : '';
 
         const prompt = `${ORCHESTRATOR_SYSTEM_PROMPT}
 
 ${roundInstruction}
+
+${directionInstruction}
 
 ## 입력 데이터
 
@@ -109,6 +122,9 @@ ${inputFiles.priceData ? `### 가격 데이터
 - 구매자 수: ${inputFiles.priceData.purchaseCount}명
 - 할인율: ${inputFiles.priceData.discountRate}%` : ''}
 
+${inputFiles.priceImage ? `### 쿠팡 가격 이미지
+아래에 쿠팡 가격 캡처 이미지가 첨부되었습니다. PRICE_AGENT가 이미지를 분석하여 가격 정보를 추출하세요.` : ''}
+
 ${previousConversation ? `### 이전 대화
 ${previousConversation}` : ''}
 
@@ -119,8 +135,38 @@ ${previousConversation}` : ''}
 [
   {"agentId": "SPEC", "content": "분석 내용...", "messageType": "analysis"},
   {"agentId": "REVIEW", "content": "리뷰 분석...", "messageType": "analysis"},
+  ${hasPriceInfo ? '{"agentId": "PRICE", "content": "가격 분석...", "messageType": "analysis"},' : ''}
   {"agentId": "STYLE", "content": "스타일 제안...", "messageType": "opinion"}
 ]`;
+
+        // 메시지 콘텐츠 구성 (이미지 포함 여부에 따라)
+        type TextBlock = { type: 'text'; text: string };
+        type ImageBlock = { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
+        type ContentBlock = TextBlock | ImageBlock;
+
+        const messageContent: ContentBlock[] = [];
+
+        // 이미지가 있으면 먼저 추가
+        if (inputFiles.priceImage) {
+            // base64 데이터에서 헤더 제거
+            const base64Data = inputFiles.priceImage.replace(/^data:image\/\w+;base64,/, '');
+            const mediaType = inputFiles.priceImage.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/png';
+
+            messageContent.push({
+                type: 'image',
+                source: {
+                    type: 'base64',
+                    media_type: mediaType,
+                    data: base64Data,
+                },
+            });
+        }
+
+        // 텍스트 프롬프트 추가
+        messageContent.push({
+            type: 'text',
+            text: prompt,
+        });
 
         const message = await anthropic.messages.create({
             model: 'claude-opus-4-5-20251101',
@@ -128,7 +174,7 @@ ${previousConversation}` : ''}
             messages: [
                 {
                     role: 'user',
-                    content: prompt,
+                    content: messageContent,
                 },
             ],
         });
