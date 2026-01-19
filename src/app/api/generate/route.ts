@@ -140,8 +140,9 @@ ${previousConversation}` : ''}
 ]`;
 
         // 메시지 콘텐츠 구성 (이미지 포함 여부에 따라)
+        type MediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
         type TextBlock = { type: 'text'; text: string };
-        type ImageBlock = { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
+        type ImageBlock = { type: 'image'; source: { type: 'base64'; media_type: MediaType; data: string } };
         type ContentBlock = TextBlock | ImageBlock;
 
         const messageContent: ContentBlock[] = [];
@@ -150,7 +151,11 @@ ${previousConversation}` : ''}
         if (inputFiles.priceImage) {
             // base64 데이터에서 헤더 제거
             const base64Data = inputFiles.priceImage.replace(/^data:image\/\w+;base64,/, '');
-            const mediaType = inputFiles.priceImage.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/png';
+            const extractedType = inputFiles.priceImage.match(/^data:(image\/\w+);base64,/)?.[1];
+            const validTypes: MediaType[] = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+            const mediaType: MediaType = validTypes.includes(extractedType as MediaType)
+                ? (extractedType as MediaType)
+                : 'image/png';
 
             messageContent.push({
                 type: 'image',

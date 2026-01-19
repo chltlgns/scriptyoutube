@@ -1,0 +1,177 @@
+﻿
+> shorts-script-generator@0.1.0 build
+> next build
+
+node.exe : ??Warning: Next.js infe
+rred your workspace root, but it m
+ay not be correct.
+위치 C:\Program Files\nodejs\npm.ps1
+:29 문자:3
++   & $NODE_EXE $NPM_CLI_JS $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : Not 
+   Specified: (??Warning: Next..  
+  .not be correct.:String) [],    
+ RemoteException
+    + FullyQualifiedErrorId : Nat 
+   iveCommandError
+ 
+ We detected multiple lockfiles an
+d selected the directory of C:\Use
+rs\campu\package-lock.json as the 
+root directory.
+ To silence this warning, set `tur
+bopack.root` in your Next.js confi
+g, or consider removing one of the
+ lockfiles if it's not needed.
+   See https://nextjs.org/docs/app
+/api-reference/config/next-config-
+js/turbopack#root-directory for mo
+re information.
+ Detected additional lockfiles: 
+   * C:\Users\campu\OneDrive\Deskt
+op\AI\program\?蹂?shorts-script-ge
+nerator\package-lock.json
+
+??Next.js 16.1.1 (Turbopack)
+- Environments: .env.local
+
+  Creating an optimized production build ...
+??Compiled successfully in 2.2s
+  Running TypeScript ...
+Failed to compile.
+
+./src/app/api/generate/route.ts:17
+7:21
+Type error: No overload matches th
+is call.
+  Overload 1 of 3, '(body: Message
+CreateParamsNonStreaming, options?
+: RequestOptions | undefined): API
+Promise<Message>', gave the follow
+ing error.
+    Type 'ContentBlock[]' is not a
+ssignable to type 'string | Conten
+tBlockParam[]'.
+      Type 'ContentBlock[]' is not
+ assignable to type 'ContentBlockP
+aram[]'.
+        Type 'ContentBlock' is not
+ assignable to type 'ContentBlockP
+aram'.
+          Type 'ImageBlock' is not
+ assignable to type 'ContentBlockP
+aram'.
+            Type 'ImageBlock' is n
+ot assignable to type 'ImageBlockP
+aram'.
+              Types of property 's
+ource' are incompatible.
+                Type '{ type: "bas
+e64"; media_type: string; data: st
+ring; }' is not assignable to type
+ 'Base64ImageSource | URLImageSour
+ce'.
+                  Type '{ type: "b
+ase64"; media_type: string; data: 
+string; }' is not assignable to ty
+pe 'Base64ImageSource'.
+                    Types of prope
+rty 'media_type' are incompatible.
+                      Type 'string
+' is not assignable to type '"imag
+e/jpeg" | "image/png" | "image/gif
+" | "image/webp"'.
+  Overload 2 of 3, '(body: Message
+CreateParamsStreaming, options?: R
+equestOptions | undefined): APIPro
+mise<Stream<RawMessageStreamEvent>
+>', gave the following error.
+    Type 'ContentBlock[]' is not a
+ssignable to type 'string | Conten
+tBlockParam[]'.
+      Type 'ContentBlock[]' is not
+ assignable to type 'ContentBlockP
+aram[]'.
+        Type 'ContentBlock' is not
+ assignable to type 'ContentBlockP
+aram'.
+          Type 'ImageBlock' is not
+ assignable to type 'ContentBlockP
+aram'.
+            Type 'ImageBlock' is n
+ot assignable to type 'ImageBlockP
+aram'.
+              Types of property 's
+ource' are incompatible.
+                Type '{ type: "bas
+e64"; media_type: string; data: st
+ring; }' is not assignable to type
+ 'Base64ImageSource | URLImageSour
+ce'.
+                  Type '{ type: "b
+ase64"; media_type: string; data: 
+string; }' is not assignable to ty
+pe 'Base64ImageSource'.
+                    Types of prope
+rty 'media_type' are incompatible.
+                      Type 'string
+' is not assignable to type '"imag
+e/jpeg" | "image/png" | "image/gif
+" | "image/webp"'.
+  Overload 3 of 3, '(body: Message
+CreateParamsBase, options?: Reques
+tOptions | undefined): APIPromise<
+Message | Stream<RawMessageStreamE
+vent>>', gave the following error.
+    Type 'ContentBlock[]' is not a
+ssignable to type 'string | Conten
+tBlockParam[]'.
+      Type 'ContentBlock[]' is not
+ assignable to type 'ContentBlockP
+aram[]'.
+        Type 'ContentBlock' is not
+ assignable to type 'ContentBlockP
+aram'.
+          Type 'ImageBlock' is not
+ assignable to type 'ContentBlockP
+aram'.
+            Type 'ImageBlock' is n
+ot assignable to type 'ImageBlockP
+aram'.
+              Types of property 's
+ource' are incompatible.
+                Type '{ type: "bas
+e64"; media_type: string; data: st
+ring; }' is not assignable to type
+ 'Base64ImageSource | URLImageSour
+ce'.
+                  Type '{ type: "b
+ase64"; media_type: string; data: 
+string; }' is not assignable to ty
+pe 'Base64ImageSource'.
+                    Types of prope
+rty 'media_type' are incompatible.
+                      Type 'string
+' is not assignable to type '"imag
+e/jpeg" | "image/png" | "image/gif
+" | "image/webp"'.
+
+[0m [90m 175 |[39m             
+    {
+ [90m 176 |[39m                 
+    role[33m:[39m [32m'user'[3
+9m[33m,[39m
+[31m[1m>[22m[39m[90m 177 |[3
+9m                     content[33
+m:[39m messageContent[33m,[39m
+ [90m     |[39m                 
+    [31m[1m^[22m[39m
+ [90m 178 |[39m                 
+}[33m,[39m
+ [90m 179 |[39m             ][3
+3m,[39m
+ [90m 180 |[39m         })[33m;
+[39m[0m
+Next.js build worker exited with c
+ode: 1 and signal: null
