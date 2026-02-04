@@ -22,6 +22,13 @@ export function FileUpload({ onFilesReady, isDisabled }: FileUploadProps) {
     const [priceImagePreview, setPriceImagePreview] = useState<string>('');
     const [direction, setDirection] = useState<string>('');
 
+    // URL crawl states
+    const [coupangUrl, setCoupangUrl] = useState<string>('');
+    const [isCrawling, setIsCrawling] = useState(false);
+    const [crawlStatus, setCrawlStatus] = useState<string>('');
+    const [crawlError, setCrawlError] = useState<string>('');
+    const [productName, setProductName] = useState<string>('');
+
     const productFileRef = useRef<HTMLInputElement>(null);
     const reviewFileRef = useRef<HTMLInputElement>(null);
     const priceImageRef = useRef<HTMLInputElement>(null);
@@ -47,6 +54,54 @@ export function FileUpload({ onFilesReady, isDisabled }: FileUploadProps) {
         reader.readAsDataURL(file);
     };
 
+    // Handle URL crawl (reviews only)
+    const handleCrawl = async () => {
+        if (!coupangUrl || !coupangUrl.includes('coupang.com')) {
+            setCrawlError('유효한 쿠팡 URL을 입력해주세요.');
+            return;
+        }
+
+        setIsCrawling(true);
+        setCrawlStatus('크롤링 중... (Chrome 실행 중이면 먼저 종료해주세요)');
+        setCrawlError('');
+
+        try {
+            const response = await fetch('/api/crawl', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: coupangUrl }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || '크롤링 실패');
+            }
+
+            // Auto-fill reviews only (not product info)
+            setReviews(data.reviews || '');
+            setProductName(data.productName || '');
+            setCrawlStatus(`✅ "${data.productName}" 리뷰 수집 완료!`);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : '크롤링 실패';
+            setCrawlError(message);
+            setCrawlStatus('');
+        } finally {
+            setIsCrawling(false);
+        }
+    };
+
+    // Download TXT file helper
+    const handleDownloadTxt = (content: string, filename: string) => {
+        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
     const handleSubmit = () => {
         if (!productInfo || !reviews) {
             alert('제품 정보와 리뷰 파일을 모두 업로드해주세요.');
@@ -67,13 +122,13 @@ export function FileUpload({ onFilesReady, isDisabled }: FileUploadProps) {
     return (
         <div className="bg-gray-900 rounded-xl p-6 space-y-6">
             <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                📁 파일 업로드
+                📁 데이터 입력
             </h2>
 
-            {/* 제품 정보 */}
+            {/* Section 1: 제품 정보 (TXT File Upload Only) */}
             <div className="space-y-2">
                 <label className="text-sm font-medium text-gray-300">
-                    제품 정보 (productinfo.txt)
+                    📄 제품 정보 (TXT 파일 업로드)
                 </label>
                 <input
                     type="file"
@@ -87,40 +142,113 @@ export function FileUpload({ onFilesReady, isDisabled }: FileUploadProps) {
                 />
                 <button
                     onClick={() => productFileRef.current?.click()}
-                    className={`w-full py-3 px-4 rounded-lg border-2 border-dashed transition-colors ${productInfo
+                    className={`w-full py-3 px-4 rounded-lg border-2 border-dashed transition-colors ${
+                        productInfo
                             ? 'border-green-500 bg-green-500/10 text-green-400'
                             : 'border-gray-600 hover:border-blue-500 text-gray-400'
-                        }`}
+                    }`}
                 >
                     {productInfo ? '✅ 업로드됨' : '📄 파일 선택...'}
                 </button>
             </div>
 
-            {/* 리뷰 데이터 */}
-            <div className="space-y-2">
+            {/* Section 2: 리뷰 데이터 */}
+            <div className="space-y-3">
                 <label className="text-sm font-medium text-gray-300">
-                    리뷰 데이터 (review.txt)
+                    💬 리뷰 데이터
                 </label>
-                <input
-                    type="file"
-                    ref={reviewFileRef}
-                    accept=".txt"
-                    onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) handleFileRead(file, setReviews);
-                    }}
-                    className="hidden"
-                />
-                <button
-                    onClick={() => reviewFileRef.current?.click()}
-                    className={`w-full py-3 px-4 rounded-lg border-2 border-dashed transition-colors ${reviews
-                            ? 'border-green-500 bg-green-500/10 text-green-400'
-                            : 'border-gray-600 hover:border-blue-500 text-gray-400'
+
+                {/* Option A: URL 자동 수집 */}
+                <div className="space-y-3 p-4 bg-gradient-to-r from-blue-900/30 to-purple-900/30 rounded-xl border border-blue-800/50">
+                    <label className="text-xs font-medium text-blue-300 flex items-center gap-2">
+                        🔗 쿠팡 리뷰 URL로 자동 수집
+                    </label>
+                    <div className="flex gap-2">
+                        <input
+                            type="text"
+                            value={coupangUrl}
+                            onChange={(e) => {
+                                setCoupangUrl(e.target.value);
+                                setCrawlError('');
+                            }}
+                            placeholder="https://www.coupang.com/vp/products/..."
+                            className="flex-1 bg-gray-800 rounded-lg px-4 py-3 text-white text-sm placeholder-gray-500 border border-gray-700 focus:border-blue-500 focus:outline-none"
+                            disabled={isCrawling}
+                        />
+                        <button
+                            onClick={handleCrawl}
+                            disabled={isCrawling || !coupangUrl}
+                            className={`px-6 py-3 rounded-lg font-medium text-sm whitespace-nowrap transition-all ${
+                                isCrawling
+                                    ? 'bg-blue-800 text-blue-300 cursor-wait'
+                                    : coupangUrl
+                                        ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                                        : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                            }`}
+                        >
+                            {isCrawling ? '⏳ 수집 중...' : '🕷️ 자동 수집'}
+                        </button>
+                    </div>
+
+                    {/* Status */}
+                    {crawlStatus && (
+                        <p className="text-sm text-green-400">{crawlStatus}</p>
+                    )}
+                    {crawlError && (
+                        <p className="text-sm text-red-400">{crawlError}</p>
+                    )}
+                    {isCrawling && (
+                        <div className="flex items-center gap-2 text-sm text-blue-300">
+                            <div className="animate-spin w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full" />
+                            Chrome으로 쿠팡 리뷰를 수집 중입니다... (약 1-2분 소요)
+                        </div>
+                    )}
+                </div>
+
+                {/* Divider */}
+                <div className="flex items-center gap-4">
+                    <div className="flex-1 h-px bg-gray-700"></div>
+                    <span className="text-xs text-gray-500">또는 직접 업로드</span>
+                    <div className="flex-1 h-px bg-gray-700"></div>
+                </div>
+
+                {/* Option B: TXT File Upload */}
+                <div className="space-y-2">
+                    <input
+                        type="file"
+                        ref={reviewFileRef}
+                        accept=".txt"
+                        onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleFileRead(file, setReviews);
+                        }}
+                        className="hidden"
+                    />
+                    <button
+                        onClick={() => reviewFileRef.current?.click()}
+                        className={`w-full py-3 px-4 rounded-lg border-2 border-dashed transition-colors ${
+                            reviews
+                                ? 'border-green-500 bg-green-500/10 text-green-400'
+                                : 'border-gray-600 hover:border-blue-500 text-gray-400'
                         }`}
-                >
-                    {reviews ? '✅ 업로드됨' : '📄 파일 선택...'}
-                </button>
+                    >
+                        {reviews ? '✅ 업로드됨' : '📄 파일 선택...'}
+                    </button>
+                </div>
             </div>
+
+            {/* 수집된 리뷰 다운로드 (crawled data only) */}
+            {reviews && productName && (
+                <div className="space-y-2 p-3 bg-gray-800/50 rounded-lg">
+                    <label className="text-xs font-medium text-gray-400">📥 수집된 리뷰 다운로드</label>
+                    <button
+                        onClick={() => handleDownloadTxt(reviews, `리뷰_${productName}.txt`)}
+                        className="w-full py-2 px-3 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-sm transition-colors flex items-center justify-center gap-1"
+                    >
+                        💬 리뷰 저장
+                    </button>
+                </div>
+            )}
 
             {/* 쿠팡 가격 이미지 (선택) */}
             <div className="space-y-2">
@@ -139,10 +267,11 @@ export function FileUpload({ onFilesReady, isDisabled }: FileUploadProps) {
                 />
                 <button
                     onClick={() => priceImageRef.current?.click()}
-                    className={`w-full py-3 px-4 rounded-lg border-2 border-dashed transition-colors ${priceImage
+                    className={`w-full py-3 px-4 rounded-lg border-2 border-dashed transition-colors ${
+                        priceImage
                             ? 'border-pink-500 bg-pink-500/10 text-pink-400'
                             : 'border-gray-600 hover:border-pink-500 text-gray-400'
-                        }`}
+                    }`}
                 >
                     {priceImage ? '✅ 이미지 업로드됨' : '🖼️ 이미지 선택...'}
                 </button>
@@ -251,10 +380,11 @@ export function FileUpload({ onFilesReady, isDisabled }: FileUploadProps) {
             <button
                 onClick={handleSubmit}
                 disabled={!isReady || isDisabled}
-                className={`w-full py-4 rounded-xl font-bold text-lg transition-all ${isReady && !isDisabled
+                className={`w-full py-4 rounded-xl font-bold text-lg transition-all ${
+                    isReady && !isDisabled
                         ? 'bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white shadow-lg shadow-blue-500/25'
                         : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                    }`}
+                }`}
             >
                 {isDisabled ? '⏳ 생성 중...' : '🚀 대본 생성 시작'}
             </button>

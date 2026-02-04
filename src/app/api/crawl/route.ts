@@ -1,0 +1,140 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import path from 'path';
+import fs from 'fs/promises';
+
+const execAsync = promisify(execFile);
+
+export async function POST(request: NextRequest) {
+    try {
+        const { url } = await request.json();
+
+        // Validate URL
+        if (!url) {
+            return NextResponse.json(
+                { error: '유효한 쿠팡 URL을 입력해주세요.' },
+                { status: 400 }
+            );
+        }
+
+        try {
+            const parsedUrl = new URL(url);
+            const hostname = parsedUrl.hostname.toLowerCase();
+            if (hostname !== 'coupang.com' && !hostname.endsWith('.coupang.com')) {
+                return NextResponse.json(
+                    { error: '유효한 쿠팡 URL을 입력해주세요.' },
+                    { status: 400 }
+                );
+            }
+        } catch {
+            return NextResponse.json(
+                { error: '유효하지 않은 URL 형식입니다.' },
+                { status: 400 }
+            );
+        }
+
+        // Path to the crawler script
+        const scriptDir = path.resolve(process.cwd(), '..'); // Parent of shorts-script-generator is 대본
+        const scriptPath = path.join(scriptDir, 'coupang-review-nodriver.py');
+
+        // Check if script exists
+        try {
+            await fs.access(scriptPath);
+        } catch {
+            return NextResponse.json(
+                { error: '크롤러 스크립트를 찾을 수 없습니다.' },
+                { status: 500 }
+            );
+        }
+
+        // Run the crawler with the URL as environment variable
+        const env = {
+            ...process.env,
+            COUPANG_URL: url,
+            PYTHONIOENCODING: 'utf-8',
+        };
+
+        console.log('리뷰 크롤러 실행 중:', url);
+
+        const { stdout, stderr } = await execAsync(
+            'python',
+            [scriptPath],
+            {
+                env,
+                timeout: 180000, // 3 minutes timeout
+                maxBuffer: 10 * 1024 * 1024, // 10MB
+                cwd: scriptDir,
+            }
+        );
+
+        console.log('리뷰 크롤러 stdout:', stdout.substring(0, 500));
+        if (stderr) console.log('리뷰 크롤러 stderr:', stderr.substring(0, 500));
+
+        // Find the output files
+        // The crawler saves files as: coupang-product-info-{name}.txt and coupang-reviews-{name}.txt
+        const files = await fs.readdir(scriptDir);
+
+        // Find most recent product info and review files
+        const productInfoFiles = files.filter(f => f.startsWith('coupang-product-info-') && f.endsWith('.txt'));
+        const reviewFiles = files.filter(f => f.startsWith('coupang-reviews-') && f.endsWith('.txt') && !f.includes('nodriver'));
+
+        if (reviewFiles.length === 0) {
+            return NextResponse.json(
+                { error: '리뷰 파일이 생성되지 않았습니다.' },
+                { status: 500 }
+            );
+        }
+
+        // Get the most recently modified files
+        const getLatestFile = async (fileList: string[]) => {
+            let latest = { name: '', mtime: 0 };
+            for (const f of fileList) {
+                const stat = await fs.stat(path.join(scriptDir, f));
+                if (stat.mtimeMs > latest.mtime) {
+                    latest = { name: f, mtime: stat.mtimeMs };
+                }
+            }
+            return latest.name;
+        };
+
+        const latestReview = await getLatestFile(reviewFiles);
+        const latestProductInfo = productInfoFiles.length > 0 ? await getLatestFile(productInfoFiles) : null;
+
+        // Read file contents
+        const reviews = await fs.readFile(path.join(scriptDir, latestReview), 'utf-8');
+        const productInfo = latestProductInfo
+            ? await fs.readFile(path.join(scriptDir, latestProductInfo), 'utf-8')
+            : '';
+
+        // Extract product name from file name (from review file)
+        const productName = latestReview
+            .replace('coupang-reviews-', '')
+            .replace('.txt', '');
+
+        return NextResponse.json({
+            success: true,
+            productName,
+            productInfo,
+            reviews,
+            productInfoFile: latestProductInfo || '',
+            reviewFile: latestReview,
+        });
+
+    } catch (error) {
+        console.error('리뷰 크롤러 오류:', error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+
+        if (errorMessage.includes('timeout')) {
+            return NextResponse.json(
+                { error: '리뷰 크롤링 시간이 초과되었습니다. (3분 제한) Chrome이 실행 중이지 않은지 확인해주세요.' },
+                { status: 504 }
+            );
+        }
+
+        return NextResponse.json(
+            { error: `리뷰 크롤링 실패: ${errorMessage}` },
+            { status: 500 }
+        );
+    }
+}

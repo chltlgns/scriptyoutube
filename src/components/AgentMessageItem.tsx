@@ -1,6 +1,6 @@
 'use client';
 
-import { AgentMessage, AGENTS } from '@/lib/types';
+import { AgentMessage, AGENTS, AgentId, Agent } from '@/lib/types';
 import { motion } from 'framer-motion';
 
 interface AgentMessageItemProps {
@@ -10,19 +10,18 @@ interface AgentMessageItemProps {
 export function AgentMessageItem({ message }: AgentMessageItemProps) {
     const agent = AGENTS[message.agentId];
 
-    // 멘션 하이라이팅
-    const formatContent = (content: string) => {
-        return content.replace(/@(SPEC|REVIEW|STYLE|PRICE|BOSS|USER)(_AGENT)?/g, (match) => {
-            const agentId = match.replace('@', '').replace('_AGENT', '') as keyof typeof AGENTS;
-            if (AGENTS[agentId]) {
-                return `<span class="text-${agentId.toLowerCase()}-highlight font-semibold">@${AGENTS[agentId].name}</span>`;
-            }
-            return match;
-        });
+    // Helper function to safely get agent from mention
+    const getAgentFromMention = (mention: string): Agent | undefined => {
+        const agentId = mention.replace('@', '').replace('_AGENT', '');
+        if (agentId in AGENTS) {
+            return AGENTS[agentId as AgentId];
+        }
+        return undefined;
     };
 
-    // 사용자 메시지인지 확인
-    const isUserMessage = message.agentId === 'USER';
+    // Unused variables removed to fix ESLint errors
+    // const formatContent = (content: string) => { ... };
+    // const isUserMessage = message.agentId === 'USER';
 
     return (
         <motion.div
@@ -62,30 +61,37 @@ export function AgentMessageItem({ message }: AgentMessageItemProps) {
 
                 {/* 내용 */}
                 <div className="text-gray-200 whitespace-pre-wrap leading-relaxed">
-                    {message.content.split('\n').map((line, i) => (
-                        <p key={i} className="mb-1">
-                            {line.startsWith('@') ? (
-                                <span>
-                                    <span
-                                        className="font-semibold px-1 rounded"
-                                        style={{
-                                            backgroundColor: AGENTS[line.split(' ')[0].replace('@', '').replace('_AGENT', '') as keyof typeof AGENTS]?.color + '30' || '#666',
-                                            color: AGENTS[line.split(' ')[0].replace('@', '').replace('_AGENT', '') as keyof typeof AGENTS]?.color || '#fff'
-                                        }}
-                                    >
-                                        {line.split(' ')[0]}
+                    {message.content.split('\n').map((line, i) => {
+                        if (line.startsWith('@')) {
+                            const mentionText = line.split(' ')[0];
+                            const mentionedAgent = getAgentFromMention(mentionText);
+                            const backgroundColor = mentionedAgent?.color ? `${mentionedAgent.color}30` : '#666';
+                            const textColor = mentionedAgent?.color || '#fff';
+
+                            return (
+                                <p key={i} className="mb-1">
+                                    <span>
+                                        <span
+                                            className="font-semibold px-1 rounded"
+                                            style={{
+                                                backgroundColor,
+                                                color: textColor
+                                            }}
+                                        >
+                                            {mentionText}
+                                        </span>
+                                        {' '}{line.split(' ').slice(1).join(' ')}
                                     </span>
-                                    {' '}{line.split(' ').slice(1).join(' ')}
-                                </span>
-                            ) : line.startsWith('[') ? (
-                                <span className="font-semibold text-white">{line}</span>
-                            ) : line.startsWith('-') || line.startsWith('•') || line.match(/^\d\./) ? (
-                                <span className="text-gray-300 ml-2">{line}</span>
-                            ) : (
-                                line
-                            )}
-                        </p>
-                    ))}
+                                </p>
+                            );
+                        } else if (line.startsWith('[')) {
+                            return <p key={i} className="mb-1"><span className="font-semibold text-white">{line}</span></p>;
+                        } else if (line.startsWith('-') || line.startsWith('•') || line.match(/^\d\./)) {
+                            return <p key={i} className="mb-1"><span className="text-gray-300 ml-2">{line}</span></p>;
+                        } else {
+                            return <p key={i} className="mb-1">{line}</p>;
+                        }
+                    })}
                 </div>
 
                 {/* 메시지 타입 태그 */}

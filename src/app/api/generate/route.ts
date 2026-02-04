@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
+import type { MessageParam } from '@anthropic-ai/sdk/resources/messages';
 import { AgentId, MessageType, AgentMessage, InputFiles } from '@/lib/types';
 import { ORCHESTRATOR_SYSTEM_PROMPT } from '@/lib/prompts';
 
@@ -15,7 +16,7 @@ export async function POST(request: NextRequest) {
         };
 
         const apiKey = process.env.ANTHROPIC_API_KEY;
-        console.log('🔑 Anthropic API Key 사용 중:', apiKey ? `${apiKey.substring(0, 15)}...${apiKey.substring(apiKey.length - 4)}` : 'NOT SET');
+        console.log('🔑 Anthropic API Key:', apiKey ? '설정됨' : 'NOT SET');
 
         if (!apiKey) {
             return NextResponse.json(
@@ -174,12 +175,12 @@ ${previousConversation}` : ''}
         });
 
         const message = await anthropic.messages.create({
-            model: 'claude-opus-4-5-20251101',
+            model: 'claude-sonnet-4-20250514',
             max_tokens: 4096,
             messages: [
                 {
                     role: 'user',
-                    content: messageContent,
+                    content: messageContent as MessageParam['content'],
                 },
             ],
         });
@@ -192,7 +193,7 @@ ${previousConversation}` : ''}
         if (!jsonMatch) {
             console.error('JSON을 찾을 수 없음:', text);
             return NextResponse.json(
-                { error: 'AI 응답에서 JSON을 찾을 수 없습니다.', raw: text },
+                { error: 'AI 응답 파싱에 실패했습니다.' },
                 { status: 500 }
             );
         }
@@ -233,7 +234,7 @@ ${previousConversation}` : ''}
         } catch (parseError) {
             console.error('JSON 파싱 오류:', parseError, jsonMatch[0]);
             return NextResponse.json(
-                { error: 'JSON 파싱 실패', raw: jsonMatch[0] },
+                { error: 'AI 응답 파싱에 실패했습니다.' },
                 { status: 500 }
             );
         }
@@ -242,7 +243,7 @@ ${previousConversation}` : ''}
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error('에러 메시지:', errorMessage);
         return NextResponse.json(
-            { error: errorMessage },
+            { error: '대본 생성 중 오류가 발생했습니다.' },
             { status: 500 }
         );
     }
