@@ -1,3 +1,5 @@
+import type { AgentId, AgentMessage, InputFiles } from './types';
+
 // 에이전트 시스템 프롬프트
 
 export const SPEC_AGENT_PROMPT = `당신은 SPEC_AGENT (스펙 분석 전문가)입니다.
@@ -240,3 +242,146 @@ messageType: analysis | opinion | question | rebuttal | consensus | final_script
 - 실제 단톡방처럼 의견 교환, 반박, 동의 진행
 - BOSS는 마지막에 최종 대본 작성
 - 가격 정보가 있으면 PRICE 에이전트가 반드시 참여`;
+
+// 에이전트별 시스템 프롬프트 매핑
+export const AGENT_SYSTEM_PROMPTS: Record<AgentId, string> = {
+  SPEC: SPEC_AGENT_PROMPT,
+  REVIEW: REVIEW_AGENT_PROMPT,
+  STYLE: STYLE_AGENT_PROMPT,
+  PRICE: PRICE_AGENT_PROMPT,
+  BOSS: BOSS_AGENT_PROMPT,
+  USER: '',
+};
+
+// 입력 데이터를 텍스트로 변환
+function formatInputData(inputFiles: InputFiles): string {
+  let text = `## 입력 데이터
+
+### 제품 정보
+${inputFiles.productInfo}
+
+### 리뷰 데이터
+${inputFiles.reviews}`;
+
+  if (inputFiles.priceData) {
+    text += `
+
+### 가격 데이터
+- 현재가: ${inputFiles.priceData.currentPrice.toLocaleString()}원
+- 최저가: ${inputFiles.priceData.lowestPrice.toLocaleString()}원
+- 구매자 수: ${inputFiles.priceData.purchaseCount}명
+- 할인율: ${inputFiles.priceData.discountRate}%`;
+  }
+
+  return text;
+}
+
+// Round 1: 개별 에이전트용 유저 메시지 빌더
+export function buildAgentAnalysisPrompt(
+  agentId: AgentId,
+  inputFiles: InputFiles
+): string {
+  const data = formatInputData(inputFiles);
+  const directionNote = inputFiles.direction
+    ? `\n\n## 프로듀서 요청 방향\n"${inputFiles.direction}"\n위 방향을 우선적으로 반영하여 분석하세요.`
+    : '';
+
+  return `아래 데이터를 분석하여 당신의 전문 영역에서 핵심 분석 결과를 2-3문단으로 공유하세요.
+출력 형식에 맞춰 한국어로 작성하세요.
+
+${data}${directionNote}`;
+}
+
+// Round 2: 오케스트레이터용 토론 프롬프트 빌더
+export function buildDebatePrompt(
+  previousMessages: AgentMessage[],
+  inputFiles: InputFiles
+): string {
+  const summary = summarizeContext(previousMessages);
+  const hasPriceInfo = inputFiles.priceData || inputFiles.priceImage;
+  const directionNote = inputFiles.direction
+    ? `\n\n## 프로듀서 요청 방향\n"${inputFiles.direction}"`
+    : '';
+
+  return `## Round 2: 토론 및 반박
+에이전트들이 서로의 의견에 반응하고 토론합니다.
+- @멘션으로 다른 에이전트에게 의견 제시
+- 동의, 반박, 보완 의견 교환
+- 후킹과 핵심 포인트 결정을 위해 토론
+${hasPriceInfo ? '- PRICE 에이전트의 가격 분석을 후킹에 활용할지 토론' : ''}
+반드시 3-4개의 메시지를 생성하세요.
+${directionNote}
+
+### 이전 분석 결과
+${summary}
+
+## 출력
+이번 라운드의 에이전트 메시지들을 JSON 배열로 반환하세요.
+반드시 유효한 JSON 형식으로만 응답하세요. 다른 텍스트 없이 JSON만 출력하세요.
+
+[
+  {"agentId": "SPEC", "content": "...", "messageType": "opinion"},
+  {"agentId": "REVIEW", "content": "...", "messageType": "rebuttal"},
+  ...
+]
+
+messageType: opinion | question | rebuttal | consensus`;
+}
+
+// Round 3: BOSS용 최종 대본 프롬프트 빌더
+export function buildFinalScriptPrompt(
+  previousMessages: AgentMessage[],
+  inputFiles: InputFiles
+): string {
+  const summary = summarizeContext(previousMessages);
+  const hasPriceInfo = inputFiles.priceData || inputFiles.priceImage;
+  const directionNote = inputFiles.direction
+    ? `\n\n## 프로듀서 요청 방향\n"${inputFiles.direction}"`
+    : '';
+
+  return `## Round 3: 합의 및 최종 대본
+이전 라운드의 토론을 정리하고 최종 대본을 작성합니다.
+- 합의된 사항 정리
+- 40초 분량 최종 대본 작성 (약 180자)
+- 제목 후보 3개 제안
+- 타겟 시청자 명시
+${hasPriceInfo ? '- 가격 관련 후킹 포함 (예: "지금 이 가격 아니면 못 삼")' : ''}
+${directionNote}
+
+### 전체 토론 내용
+${summary}
+
+반드시 최종 대본 형식으로 작성하세요.`;
+}
+
+// 수정 요청 프롬프트 빌더
+export function buildRevisionPrompt(
+  previousMessages: AgentMessage[],
+  inputFiles: InputFiles,
+  userFeedback: string
+): string {
+  const summary = summarizeContext(previousMessages);
+  const directionNote = inputFiles.direction
+    ? `\n\n## 프로듀서 요청 방향\n"${inputFiles.direction}"`
+    : '';
+
+  return `## 수정 요청
+프로듀서(USER)가 대본에 대한 수정 요청을 했습니다.
+
+### 프로듀서 피드백:
+"${userFeedback}"
+${directionNote}
+
+### 이전 대화
+${summary}
+
+피드백을 반영하여 수정된 최종 대본을 작성하세요.
+반드시 최종 대본 형식으로 작성하세요.`;
+}
+
+// 컨텍스트 요약 함수 (토큰 절약)
+export function summarizeContext(messages: AgentMessage[]): string {
+  return messages
+    .map((m) => `[${m.agentId}] (${m.messageType}): ${m.content}`)
+    .join('\n\n');
+}

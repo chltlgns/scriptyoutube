@@ -5,7 +5,7 @@ import { FileUpload } from '@/components/FileUpload';
 import { ChatRoom } from '@/components/ChatRoom';
 import { ScriptOutput } from '@/components/ScriptOutput';
 import { useConversationStore } from '@/lib/store';
-import { InputFiles, AgentMessage, FinalScript } from '@/lib/types';
+import { InputFiles, AgentMessage, StreamEvent } from '@/lib/types';
 
 export default function Home() {
   const {
@@ -13,56 +13,108 @@ export default function Home() {
     currentRound,
     isGenerating,
     finalScript,
+    activeAgents,
+    streamingContent,
     addMessage,
     setIsGenerating,
     setFinalScript,
     incrementRound,
+    setAgentActive,
+    setAgentInactive,
+    appendStreamingContent,
+    clearStreamingContent,
+    clearAllStreaming,
     reset,
   } = useConversationStore();
 
   const [inputFiles, setInputFiles] = useState<InputFiles | null>(null);
   const [isStarted, setIsStarted] = useState(false);
 
-  const handleFilesReady = async (files: InputFiles) => {
-    setInputFiles(files);
-    setIsStarted(true);
-    reset();
-    setIsGenerating(true);
+  const processSSEStream = async (response: Response) => {
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
 
-    try {
-      // Round 1: 초기 분석
-      await runRound(files, 1, []);
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-      // Round 2: 토론
-      const round1Messages = useConversationStore.getState().messages;
-      await runRound(files, 2, round1Messages);
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      // 마지막 줄이 불완전할 수 있으므로 버퍼에 유지
+      buffer = lines.pop() || '';
 
-      // Round 3: 최종 대본
-      const round2Messages = useConversationStore.getState().messages;
-      await runRound(files, 3, round2Messages);
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const event: StreamEvent = JSON.parse(line.slice(6));
 
-    } catch (error) {
-      console.error('생성 오류:', error);
-      alert('대본 생성 중 오류가 발생했습니다.');
-    } finally {
-      setIsGenerating(false);
+          switch (event.type) {
+            case 'round_start':
+              incrementRound();
+              break;
+
+            case 'agent_start':
+              if (event.agentId) {
+                setAgentActive(event.agentId);
+              }
+              break;
+
+            case 'agent_chunk':
+              if (event.agentId && event.content) {
+                appendStreamingContent(event.agentId, event.content);
+              }
+              break;
+
+            case 'agent_complete':
+              if (event.agentId) {
+                clearStreamingContent(event.agentId);
+                setAgentInactive(event.agentId);
+                if (event.content) {
+                  addMessage({
+                    id: `${currentRound}-${event.agentId}-${Date.now()}`,
+                    agentId: event.agentId,
+                    content: event.content,
+                    timestamp: new Date(),
+                    messageType: event.messageType || 'analysis',
+                  });
+                }
+              }
+              break;
+
+            case 'final_script':
+              if (event.finalScript) {
+                setFinalScript(event.finalScript);
+              }
+              break;
+
+            case 'error':
+              console.error('스트리밍 에러:', event.error);
+              break;
+          }
+        } catch {
+          // JSON 파싱 실패 무시 (불완전한 청크)
+        }
+      }
     }
   };
 
-  const runRound = async (
+  const runRoundStreaming = async (
     files: InputFiles,
     round: number,
-    previousMessages: AgentMessage[]
+    previousMessages: AgentMessage[],
+    userFeedback?: string,
+    isRevision?: boolean,
   ) => {
-    incrementRound();
-
-    const response = await fetch('/api/generate', {
+    const response = await fetch('/api/generate/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         inputFiles: files,
         round,
         previousMessages,
+        userFeedback,
+        isRevision,
       }),
     });
 
@@ -71,31 +123,38 @@ export default function Home() {
       throw new Error(error.error || '알 수 없는 오류');
     }
 
-    const data = await response.json() as {
-      messages: AgentMessage[];
-      finalScript?: FinalScript;
-    };
+    await processSSEStream(response);
+  };
 
-    // 메시지 순차 추가 (애니메이션 효과)
-    for (const message of data.messages) {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      addMessage({
-        ...message,
-        timestamp: new Date(message.timestamp),
-      });
-    }
+  const handleFilesReady = async (files: InputFiles) => {
+    setInputFiles(files);
+    setIsStarted(true);
+    reset();
+    setIsGenerating(true);
 
-    // 최종 대본 설정
-    if (data.finalScript) {
-      setFinalScript(data.finalScript);
+    try {
+      // Round 1: 병렬 분석
+      await runRoundStreaming(files, 1, []);
+
+      // Round 2: 토론
+      const round1Messages = useConversationStore.getState().messages;
+      await runRoundStreaming(files, 2, round1Messages);
+
+      // Round 3: 최종 대본
+      const round2Messages = useConversationStore.getState().messages;
+      await runRoundStreaming(files, 3, round2Messages);
+    } catch (error) {
+      console.error('생성 오류:', error);
+      alert('대본 생성 중 오류가 발생했습니다.');
+    } finally {
+      setIsGenerating(false);
+      clearAllStreaming();
     }
   };
 
-  // 사용자 메시지 전송 핸들러
   const handleSendMessage = async (content: string) => {
     if (!inputFiles) return;
 
-    // 사용자 메시지 추가
     const userMessage: AgentMessage = {
       id: `user-${Date.now()}`,
       agentId: 'USER',
@@ -108,51 +167,21 @@ export default function Home() {
     setIsGenerating(true);
 
     try {
-      // 현재 메시지 목록 가져오기
       const currentMessages = useConversationStore.getState().messages;
 
-      // 수정 라운드 실행
-      const response = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          inputFiles,
-          round: finalScript ? 4 : currentRound, // 수정 요청이면 라운드 4
-          previousMessages: currentMessages,
-          userFeedback: content,
-          isRevision: !!finalScript,
-        }),
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || '알 수 없는 오류');
-      }
-
-      const data = await response.json() as {
-        messages: AgentMessage[];
-        finalScript?: FinalScript;
-      };
-
-      // 메시지 순차 추가
-      for (const message of data.messages) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        addMessage({
-          ...message,
-          timestamp: new Date(message.timestamp),
-        });
-      }
-
-      // 최종 대본 업데이트
-      if (data.finalScript) {
-        setFinalScript(data.finalScript);
-      }
-
+      await runRoundStreaming(
+        inputFiles,
+        finalScript ? 4 : currentRound,
+        currentMessages,
+        content,
+        !!finalScript,
+      );
     } catch (error) {
       console.error('메시지 처리 오류:', error);
       alert('메시지 처리 중 오류가 발생했습니다.');
     } finally {
       setIsGenerating(false);
+      clearAllStreaming();
     }
   };
 
@@ -191,6 +220,8 @@ export default function Home() {
               currentRound={currentRound}
               onSendMessage={handleSendMessage}
               canSendMessage={isStarted}
+              activeAgents={activeAgents}
+              streamingContent={streamingContent}
             />
           </div>
         </div>

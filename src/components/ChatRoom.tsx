@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useEffect, useState } from 'react';
-import { AgentMessage, AGENTS } from '@/lib/types';
+import { AgentId, AgentMessage, AGENTS } from '@/lib/types';
 import { AgentMessageItem } from './AgentMessageItem';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -11,6 +11,46 @@ interface ChatRoomProps {
     currentRound: number;
     onSendMessage?: (message: string) => void;
     canSendMessage?: boolean;
+    activeAgents: Set<AgentId>;
+    streamingContent: Record<string, string>;
+}
+
+function StreamingMessage({ agentId, content }: { agentId: AgentId; content: string }) {
+    const agent = AGENTS[agentId];
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex gap-3 p-4 rounded-lg bg-gray-800/30"
+        >
+            <div
+                className="w-10 h-10 rounded-full flex items-center justify-center text-xl flex-shrink-0 relative"
+                style={{ backgroundColor: agent.color + '20' }}
+            >
+                {agent.icon}
+                <span
+                    className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full animate-pulse"
+                    style={{ backgroundColor: agent.color }}
+                />
+            </div>
+            <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                    <span className="font-semibold" style={{ color: agent.color }}>
+                        {agent.name}
+                    </span>
+                    <span className="text-xs text-gray-500">{agent.role}</span>
+                    <span className="px-1.5 py-0.5 bg-green-500/20 text-green-400 text-[10px] rounded-full animate-pulse">
+                        작성 중...
+                    </span>
+                </div>
+                <div className="text-gray-300 whitespace-pre-wrap leading-relaxed text-sm">
+                    {content}
+                    <span className="inline-block w-0.5 h-4 bg-gray-400 ml-0.5 animate-pulse" />
+                </div>
+            </div>
+        </motion.div>
+    );
 }
 
 export function ChatRoom({
@@ -18,15 +58,17 @@ export function ChatRoom({
     isGenerating,
     currentRound,
     onSendMessage,
-    canSendMessage = false
+    canSendMessage = false,
+    activeAgents,
+    streamingContent,
 }: ChatRoomProps) {
     const bottomRef = useRef<HTMLDivElement>(null);
     const [inputValue, setInputValue] = useState('');
 
-    // 새 메시지가 추가되면 스크롤
+    // 새 메시지나 스트리밍 콘텐츠 업데이트 시 스크롤
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages]);
+    }, [messages, streamingContent]);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -38,6 +80,11 @@ export function ChatRoom({
 
     // USER를 제외한 AI 에이전트만 표시
     const aiAgents = Object.values(AGENTS).filter(agent => agent.id !== 'USER');
+
+    // 활성 스트리밍 에이전트 목록
+    const streamingAgents = Array.from(activeAgents).filter(
+        (agentId) => streamingContent[agentId]
+    );
 
     return (
         <div className="bg-gray-900 rounded-xl flex flex-col h-[600px]">
@@ -52,24 +99,32 @@ export function ChatRoom({
                     )}
                 </div>
 
-                {/* 에이전트 목록 */}
+                {/* 에이전트 목록 (활성 에이전트 하이라이트) */}
                 <div className="flex items-center gap-2">
-                    {aiAgents.map((agent) => (
-                        <div
-                            key={agent.id}
-                            className="w-8 h-8 rounded-full flex items-center justify-center text-sm"
-                            style={{ backgroundColor: agent.color + '20' }}
-                            title={`${agent.name} - ${agent.role}`}
-                        >
-                            {agent.icon}
-                        </div>
-                    ))}
+                    {aiAgents.map((agent) => {
+                        const isActive = activeAgents.has(agent.id);
+                        return (
+                            <div
+                                key={agent.id}
+                                className={`w-8 h-8 rounded-full flex items-center justify-center text-sm transition-all ${
+                                    isActive ? 'scale-110' : ''
+                                }`}
+                                style={{
+                                    backgroundColor: agent.color + (isActive ? '40' : '20'),
+                                    ...(isActive ? { boxShadow: `0 0 0 2px #111827, 0 0 0 4px ${agent.color}` } : {}),
+                                }}
+                                title={`${agent.name} - ${agent.role}${isActive ? ' (응답 중)' : ''}`}
+                            >
+                                {agent.icon}
+                            </div>
+                        );
+                    })}
                 </div>
             </div>
 
             {/* 메시지 영역 */}
             <div className="flex-1 overflow-y-auto p-4 space-y-2">
-                {messages.length === 0 ? (
+                {messages.length === 0 && !isGenerating ? (
                     <div className="h-full flex flex-col items-center justify-center text-gray-500">
                         <div className="text-6xl mb-4">🤖</div>
                         <p className="text-lg">파일을 업로드하면</p>
@@ -83,23 +138,53 @@ export function ChatRoom({
                     </AnimatePresence>
                 )}
 
-                {/* 타이핑 인디케이터 */}
-                {isGenerating && (
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        className="flex items-center gap-3 p-4"
-                    >
-                        <div className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center">
-                            <div className="flex gap-1">
-                                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                            </div>
-                        </div>
-                        <span className="text-gray-400">에이전트들이 토론 중...</span>
-                    </motion.div>
-                )}
+                {/* 실시간 스트리밍 메시지 */}
+                <AnimatePresence>
+                    {streamingAgents.map((agentId) => (
+                        <StreamingMessage
+                            key={`streaming-${agentId}`}
+                            agentId={agentId}
+                            content={streamingContent[agentId]}
+                        />
+                    ))}
+                </AnimatePresence>
+
+                {/* 활성 에이전트 중 아직 텍스트 없는 에이전트 로딩 표시 */}
+                {Array.from(activeAgents)
+                    .filter((agentId) => !streamingContent[agentId])
+                    .map((agentId) => {
+                        const agent = AGENTS[agentId];
+                        return (
+                            <motion.div
+                                key={`loading-${agentId}`}
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                className="flex items-center gap-3 p-4"
+                            >
+                                <div
+                                    className="w-10 h-10 rounded-full flex items-center justify-center relative"
+                                    style={{ backgroundColor: agent.color + '20' }}
+                                >
+                                    {agent.icon}
+                                    <span
+                                        className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full animate-pulse"
+                                        style={{ backgroundColor: agent.color }}
+                                    />
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-sm" style={{ color: agent.color }}>
+                                        {agent.name}
+                                    </span>
+                                    <div className="flex gap-1">
+                                        <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ backgroundColor: agent.color, animationDelay: '0ms' }} />
+                                        <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ backgroundColor: agent.color, animationDelay: '150ms' }} />
+                                        <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ backgroundColor: agent.color, animationDelay: '300ms' }} />
+                                    </div>
+                                </div>
+                            </motion.div>
+                        );
+                    })}
 
                 <div ref={bottomRef} />
             </div>

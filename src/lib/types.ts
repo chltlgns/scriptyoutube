@@ -103,3 +103,23 @@ export interface ConversationState {
   inputFiles: InputFiles | null;
   finalScript: FinalScript | null;
 }
+
+// 스트리밍 이벤트 타입
+export type StreamEventType =
+  | 'round_start'
+  | 'agent_start'
+  | 'agent_chunk'
+  | 'agent_complete'
+  | 'round_complete'
+  | 'final_script'
+  | 'error';
+
+export interface StreamEvent {
+  type: StreamEventType;
+  agentId?: AgentId;
+  content?: string;
+  messageType?: MessageType;
+  finalScript?: FinalScript;
+  round?: number;
+  error?: string;
+}
