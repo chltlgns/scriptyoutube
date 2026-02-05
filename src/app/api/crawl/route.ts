@@ -34,7 +34,53 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Path to the crawler script (coupang-review-nodriver.py)
+        // Remote crawler mode (for Vercel deployment)
+        const crawlerUrl = process.env.CRAWLER_API_URL;
+        if (crawlerUrl) {
+            console.log('원격 크롤러 API 호출:', crawlerUrl);
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutes
+
+            try {
+                const response = await fetch(`${crawlerUrl}/crawl`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url }),
+                    signal: controller.signal,
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    return NextResponse.json(
+                        { error: data.error || '원격 크롤링 실패' },
+                        { status: response.status }
+                    );
+                }
+
+                return NextResponse.json(data);
+            } catch (fetchError) {
+                clearTimeout(timeoutId);
+                const errorMessage = fetchError instanceof Error ? fetchError.message : String(fetchError);
+
+                if (errorMessage.includes('aborted')) {
+                    return NextResponse.json(
+                        { error: '원격 크롤러 타임아웃 (3분 초과)' },
+                        { status: 504 }
+                    );
+                }
+
+                return NextResponse.json(
+                    { error: `원격 크롤러 API 오류: ${errorMessage}. 크롤러 서버가 실행 중인지 확인해주세요.` },
+                    { status: 500 }
+                );
+            } finally {
+                clearTimeout(timeoutId);
+            }
+        }
+
+        // Local mode: Path to the crawler script (coupang-review-nodriver.py)
         // Located in 대본/ directory, which is the parent of shorts-script-generator/
         const scriptName = 'coupang-review-nodriver.py';
 
