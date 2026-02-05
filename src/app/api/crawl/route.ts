@@ -34,14 +34,39 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Path to the crawler script
-        const scriptDir = path.resolve(process.cwd(), '..'); // Parent of shorts-script-generator is 대본
-        const scriptPath = path.join(scriptDir, 'coupang-review-nodriver.py');
+        // Path to the crawler script (coupang-review-nodriver.py)
+        // Located in 대본/ directory, which is the parent of shorts-script-generator/
+        const scriptName = 'coupang-review-nodriver.py';
 
-        // Check if script exists
-        try {
-            await fs.access(scriptPath);
-        } catch {
+        // Try multiple strategies to find the script
+        const candidates = [
+            // Strategy 1: Navigate from process.cwd() (works when cwd is shorts-script-generator)
+            path.resolve(process.cwd(), '..', scriptName),
+            // Strategy 2: Navigate from process.cwd() (works when cwd IS 대본)
+            path.resolve(process.cwd(), scriptName),
+            // Strategy 3: Hardcoded known path as final fallback
+            path.resolve('C:\\Users\\campu\\OneDrive\\Desktop\\AI\\oh-my-claudecode\\workspace\\대본', scriptName),
+        ];
+
+        let scriptPath = '';
+        let scriptDir = '';
+        for (const candidate of candidates) {
+            try {
+                await fs.access(candidate);
+                scriptPath = candidate;
+                scriptDir = path.dirname(candidate);
+                console.log('크롤러 스크립트 발견:', candidate);
+                break;
+            } catch {
+                console.log('크롤러 스크립트 없음:', candidate);
+            }
+        }
+
+        console.log('process.cwd():', process.cwd());
+
+        // Check if script was found
+        if (!scriptPath) {
+            console.error('크롤러 스크립트를 찾을 수 없습니다. 시도한 경로:', candidates);
             return NextResponse.json(
                 { error: '크롤러 스크립트를 찾을 수 없습니다.' },
                 { status: 500 }
