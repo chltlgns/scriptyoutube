@@ -180,7 +180,10 @@ export async function POST(request: NextRequest) {
           // Step 3: 프롬프트 조립 + 대본 생성
           const prompt = buildScriptPrompt(pattern, priceData);
 
-          const userMessage = `## 제품 정보\n${input.productInfo}\n\n## 리뷰 데이터\n${input.reviews}`;
+          const priceSection = priceData
+            ? `\n\n## 가격 추적 데이터 (내 사이트에서 추출한 실제 데이터 — 반드시 이 수치를 정확히 반영하세요)\n${priceData}`
+            : '';
+          const userMessage = `## 제품 정보\n${input.productInfo}\n\n## 리뷰 데이터\n${input.reviews}${priceSection}`;
 
           const genStream = anthropic.messages.stream({
             model: 'claude-sonnet-4-20250514',
