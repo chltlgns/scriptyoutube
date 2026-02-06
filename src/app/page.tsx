@@ -1,34 +1,12 @@
 'use client';
 
-import { useState } from 'react';
 import { FileUpload } from '@/components/FileUpload';
-import { ChatRoom } from '@/components/ChatRoom';
 import { ScriptOutput } from '@/components/ScriptOutput';
-import { useConversationStore } from '@/lib/store';
-import { InputFiles, AgentMessage, StreamEvent } from '@/lib/types';
+import { useScriptStore } from '@/lib/store';
+import type { ScriptInput, StreamEvent } from '@/lib/types';
 
 export default function Home() {
-  const {
-    messages,
-    currentRound,
-    isGenerating,
-    finalScript,
-    activeAgents,
-    streamingContent,
-    addMessage,
-    setIsGenerating,
-    setFinalScript,
-    incrementRound,
-    setAgentActive,
-    setAgentInactive,
-    appendStreamingContent,
-    clearStreamingContent,
-    clearAllStreaming,
-    reset,
-  } = useConversationStore();
-
-  const [inputFiles, setInputFiles] = useState<InputFiles | null>(null);
-  const [isStarted, setIsStarted] = useState(false);
+  const store = useScriptStore();
 
   const processSSEStream = async (response: Response) => {
     const reader = response.body!.getReader();
@@ -41,196 +19,135 @@ export default function Home() {
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
-      // 마지막 줄이 불완전할 수 있으므로 버퍼에 유지
       buffer = lines.pop() || '';
 
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
         try {
           const event: StreamEvent = JSON.parse(line.slice(6));
-
           switch (event.type) {
-            case 'round_start':
-              incrementRound();
+            case 'price_extracted':
+              if (event.priceData) store.setPriceData(event.priceData);
               break;
-
-            case 'agent_start':
-              if (event.agentId) {
-                setAgentActive(event.agentId);
+            case 'pattern_selected':
+              if (event.pattern) store.setSelectedPattern(event.pattern);
+              break;
+            case 'chunk':
+              if (event.content) store.appendStreamingText(event.content);
+              break;
+            case 'complete':
+              if (event.output) {
+                store.setOutput(event.output);
+                store.addToHistory(event.output.pattern);
               }
               break;
-
-            case 'agent_chunk':
-              if (event.agentId && event.content) {
-                appendStreamingContent(event.agentId, event.content);
-              }
-              break;
-
-            case 'agent_complete':
-              if (event.agentId) {
-                clearStreamingContent(event.agentId);
-                setAgentInactive(event.agentId);
-                if (event.content) {
-                  addMessage({
-                    id: `${currentRound}-${event.agentId}-${Date.now()}`,
-                    agentId: event.agentId,
-                    content: event.content,
-                    timestamp: new Date(),
-                    messageType: event.messageType || 'analysis',
-                  });
-                }
-              }
-              break;
-
-            case 'final_script':
-              if (event.finalScript) {
-                setFinalScript(event.finalScript);
-              }
-              break;
-
             case 'error':
-              console.error('스트리밍 에러:', event.error);
+              console.error('Error:', event.error);
+              alert(`대본 생성 오류: ${event.error}`);
               break;
           }
-        } catch {
-          // JSON 파싱 실패 무시 (불완전한 청크)
-        }
+        } catch { /* ignore parse errors */ }
       }
     }
   };
 
-  const runRoundStreaming = async (
-    files: InputFiles,
-    round: number,
-    previousMessages: AgentMessage[],
-    userFeedback?: string,
-    isRevision?: boolean,
-  ) => {
-    const response = await fetch('/api/generate/stream', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        inputFiles: files,
-        round,
-        previousMessages,
-        userFeedback,
-        isRevision,
-      }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || '알 수 없는 오류');
-    }
-
-    await processSSEStream(response);
-  };
-
-  const handleFilesReady = async (files: InputFiles) => {
-    setInputFiles(files);
-    setIsStarted(true);
-    reset();
-    setIsGenerating(true);
+  const handleGenerate = async (input: ScriptInput) => {
+    store.setInput(input);
+    store.reset();
+    store.setIsGenerating(true);
 
     try {
-      // Round 1: 병렬 분석
-      await runRoundStreaming(files, 1, []);
+      const response = await fetch('/api/generate/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input,
+          patternHistory: store.patternHistory ? [
+            ...store.patternHistory.recentHooks.slice(-3).map((h, i) => ({
+              hook: h,
+              body: store.patternHistory.recentBodies[store.patternHistory.recentBodies.length - 3 + i] || 'experience',
+              cta: store.patternHistory.recentCtas[store.patternHistory.recentCtas.length - 3 + i] || 'urgency',
+            }))
+          ] : [],
+        }),
+      });
 
-      // Round 2: 토론
-      const round1Messages = useConversationStore.getState().messages;
-      await runRoundStreaming(files, 2, round1Messages);
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || '알 수 없는 오류');
+      }
 
-      // Round 3: 최종 대본
-      const round2Messages = useConversationStore.getState().messages;
-      await runRoundStreaming(files, 3, round2Messages);
+      await processSSEStream(response);
     } catch (error) {
-      console.error('생성 오류:', error);
+      console.error('Generation error:', error);
       alert('대본 생성 중 오류가 발생했습니다.');
     } finally {
-      setIsGenerating(false);
-      clearAllStreaming();
+      store.setIsGenerating(false);
+      store.clearStreamingText();
     }
   };
 
-  const handleSendMessage = async (content: string) => {
-    if (!inputFiles) return;
-
-    const userMessage: AgentMessage = {
-      id: `user-${Date.now()}`,
-      agentId: 'USER',
-      content,
-      timestamp: new Date(),
-      messageType: finalScript ? 'revision_request' : 'user_input',
-    };
-    addMessage(userMessage);
-
-    setIsGenerating(true);
+  const handleRevision = async (feedback: string) => {
+    if (!store.input || !store.output) return;
+    store.setIsGenerating(true);
+    store.clearStreamingText();
 
     try {
-      const currentMessages = useConversationStore.getState().messages;
+      const response = await fetch('/api/generate/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input: store.input,
+          isRevision: true,
+          previousScript: store.output.script,
+          feedback,
+        }),
+      });
 
-      await runRoundStreaming(
-        inputFiles,
-        finalScript ? 4 : currentRound,
-        currentMessages,
-        content,
-        !!finalScript,
-      );
+      if (!response.ok) throw new Error('수정 요청 실패');
+      await processSSEStream(response);
     } catch (error) {
-      console.error('메시지 처리 오류:', error);
-      alert('메시지 처리 중 오류가 발생했습니다.');
+      console.error('Revision error:', error);
+      alert('수정 중 오류가 발생했습니다.');
     } finally {
-      setIsGenerating(false);
-      clearAllStreaming();
+      store.setIsGenerating(false);
+      store.clearStreamingText();
     }
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950">
-      {/* 헤더 */}
       <header className="border-b border-gray-800 bg-gray-900/80 backdrop-blur-sm sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-white flex items-center gap-3">
-            <span className="text-3xl">🤖</span>
-            AI 쇼츠 대본 생성기
+        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-white">
+            쇼츠 대본 생성기
           </h1>
           <div className="text-sm text-gray-400">
-            멀티에이전트 시스템
+            패턴 자동 로테이션 &middot; {store.patternHistory.totalGenerated}개 생성됨
           </div>
         </div>
       </header>
 
-      {/* 메인 컨텐츠 */}
-      <main className="max-w-7xl mx-auto px-4 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* 좌측: 파일 업로드 + 대본 출력 */}
-          <div className="space-y-6">
-            <FileUpload
-              onFilesReady={handleFilesReady}
-              isDisabled={isGenerating}
-            />
-            <ScriptOutput script={finalScript} />
-          </div>
-
-          {/* 우측: 채팅방 */}
-          <div className="lg:col-span-2">
-            <ChatRoom
-              messages={messages}
-              isGenerating={isGenerating}
-              currentRound={currentRound}
-              onSendMessage={handleSendMessage}
-              canSendMessage={isStarted}
-              activeAgents={activeAgents}
-              streamingContent={streamingContent}
-            />
-          </div>
+      <main className="max-w-6xl mx-auto px-4 py-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <FileUpload
+            onGenerate={handleGenerate}
+            isDisabled={store.isGenerating}
+          />
+          <ScriptOutput
+            output={store.output}
+            streamingText={store.streamingText}
+            selectedPattern={store.selectedPattern}
+            priceData={store.priceData}
+            isGenerating={store.isGenerating}
+            onRevision={handleRevision}
+          />
         </div>
       </main>
 
-      {/* 푸터 */}
       <footer className="border-t border-gray-800 mt-8">
-        <div className="max-w-7xl mx-auto px-4 py-4 text-center text-gray-600 text-sm">
-          Powered by Claude AI · 멀티에이전트 쇼츠 대본 생성 시스템
+        <div className="max-w-6xl mx-auto px-4 py-4 text-center text-gray-600 text-sm">
+          패턴 기반 대본 생성 &middot; 25-30초 최적화
         </div>
       </footer>
     </div>

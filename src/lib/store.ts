@@ -1,95 +1,82 @@
 import { create } from 'zustand';
-import { AgentId, AgentMessage, InputFiles, FinalScript, ConversationState } from './types';
+import type { ScriptInput, ScriptOutput, PatternSelection, PatternHistory } from './types';
 
-interface StreamingState {
-    activeAgents: Set<AgentId>;
-    streamingContent: Record<string, string>;
+interface ScriptState {
+  // Input
+  input: ScriptInput | null;
+
+  // Generation state
+  isGenerating: boolean;
+  streamingText: string;
+
+  // Results
+  output: ScriptOutput | null;
+  selectedPattern: PatternSelection | null;
+  priceData: string | null;
+
+  // Pattern history (for rotation - persisted in localStorage)
+  patternHistory: PatternHistory;
+
+  // Actions
+  setInput: (input: ScriptInput) => void;
+  setIsGenerating: (v: boolean) => void;
+  appendStreamingText: (chunk: string) => void;
+  clearStreamingText: () => void;
+  setOutput: (output: ScriptOutput) => void;
+  setSelectedPattern: (pattern: PatternSelection) => void;
+  setPriceData: (data: string) => void;
+  addToHistory: (pattern: PatternSelection) => void;
+  reset: () => void;
 }
 
-interface ConversationStore extends ConversationState, StreamingState {
-    addMessage: (message: AgentMessage) => void;
-    setInputFiles: (files: InputFiles) => void;
-    setIsGenerating: (isGenerating: boolean) => void;
-    setFinalScript: (script: FinalScript) => void;
-    incrementRound: () => void;
-    reset: () => void;
-
-    // 스트리밍 액션
-    setAgentActive: (agentId: AgentId) => void;
-    setAgentInactive: (agentId: AgentId) => void;
-    appendStreamingContent: (agentId: AgentId, chunk: string) => void;
-    clearStreamingContent: (agentId: AgentId) => void;
-    clearAllStreaming: () => void;
+// Load pattern history from localStorage
+function loadHistory(): PatternHistory {
+  if (typeof window === 'undefined') return { recentHooks: [], recentBodies: [], recentCtas: [], totalGenerated: 0 };
+  try {
+    const stored = localStorage.getItem('patternHistory');
+    return stored ? JSON.parse(stored) : { recentHooks: [], recentBodies: [], recentCtas: [], totalGenerated: 0 };
+  } catch {
+    return { recentHooks: [], recentBodies: [], recentCtas: [], totalGenerated: 0 };
+  }
 }
 
-const initialState: ConversationState & StreamingState = {
-    messages: [],
-    currentRound: 0,
-    isGenerating: false,
-    inputFiles: null,
-    finalScript: null,
-    activeAgents: new Set(),
-    streamingContent: {},
-};
+function saveHistory(history: PatternHistory) {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('patternHistory', JSON.stringify(history));
+  }
+}
 
-export const useConversationStore = create<ConversationStore>((set) => ({
-    ...initialState,
+export const useScriptStore = create<ScriptState>((set, get) => ({
+  input: null,
+  isGenerating: false,
+  streamingText: '',
+  output: null,
+  selectedPattern: null,
+  priceData: null,
+  patternHistory: loadHistory(),
 
-    addMessage: (message) =>
-        set((state) => ({
-            messages: [...state.messages, message],
-        })),
-
-    setInputFiles: (files) =>
-        set({ inputFiles: files }),
-
-    setIsGenerating: (isGenerating) =>
-        set({ isGenerating }),
-
-    setFinalScript: (script) =>
-        set({ finalScript: script }),
-
-    incrementRound: () =>
-        set((state) => ({
-            currentRound: state.currentRound + 1,
-        })),
-
-    reset: () =>
-        set({
-            ...initialState,
-            activeAgents: new Set(),
-            streamingContent: {},
-        }),
-
-    setAgentActive: (agentId) =>
-        set((state) => {
-            const next = new Set(state.activeAgents);
-            next.add(agentId);
-            return { activeAgents: next };
-        }),
-
-    setAgentInactive: (agentId) =>
-        set((state) => {
-            const next = new Set(state.activeAgents);
-            next.delete(agentId);
-            return { activeAgents: next };
-        }),
-
-    appendStreamingContent: (agentId, chunk) =>
-        set((state) => ({
-            streamingContent: {
-                ...state.streamingContent,
-                [agentId]: (state.streamingContent[agentId] || '') + chunk,
-            },
-        })),
-
-    clearStreamingContent: (agentId) =>
-        set((state) => {
-            const next = { ...state.streamingContent };
-            delete next[agentId];
-            return { streamingContent: next };
-        }),
-
-    clearAllStreaming: () =>
-        set({ activeAgents: new Set(), streamingContent: {} }),
+  setInput: (input) => set({ input }),
+  setIsGenerating: (v) => set({ isGenerating: v }),
+  appendStreamingText: (chunk) => set((s) => ({ streamingText: s.streamingText + chunk })),
+  clearStreamingText: () => set({ streamingText: '' }),
+  setOutput: (output) => set({ output }),
+  setSelectedPattern: (pattern) => set({ selectedPattern: pattern }),
+  setPriceData: (data) => set({ priceData: data }),
+  addToHistory: (pattern) => {
+    const current = get().patternHistory;
+    const updated: PatternHistory = {
+      recentHooks: [...current.recentHooks.slice(-4), pattern.hook],
+      recentBodies: [...current.recentBodies.slice(-4), pattern.body],
+      recentCtas: [...current.recentCtas.slice(-4), pattern.cta],
+      totalGenerated: current.totalGenerated + 1,
+    };
+    saveHistory(updated);
+    set({ patternHistory: updated });
+  },
+  reset: () => set({
+    streamingText: '',
+    output: null,
+    selectedPattern: null,
+    priceData: null,
+  }),
 }));

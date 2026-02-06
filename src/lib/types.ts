@@ -1,125 +1,82 @@
-// 타입 정의
+// ===== 패턴 타입 =====
 
-export type AgentId = 'SPEC' | 'REVIEW' | 'STYLE' | 'PRICE' | 'BOSS' | 'USER';
+export type HookType =
+  | 'problem_empathy'    // 문제공감형 (weight: 10)
+  | 'rhetorical'         // 반문형 (weight: 9)
+  | 'fomo_urgency'       // FOMO/긴급성형 (weight: 8)
+  | 'price_shock'        // 가격충격형 (weight: 7)
+  | 'question'           // 질문형 (weight: 7)
+  | 'command'            // 명령형 (weight: 6)
+  | 'comparison'         // 비교프레임형 (weight: 5)
+  | 'value_declare';     // 가성비선언형 (weight: 4)
 
-export interface Agent {
-  id: AgentId;
-  name: string;
-  icon: string;
-  color: string;
-  role: string;
+export type BodyType =
+  | 'experience'         // 체험중심 (weight: 10)
+  | 'spec_experience'    // 스펙+체험 혼합 (weight: 8)
+  | 'comparison'         // 비교분석 (weight: 7)
+  | 'problem_solution';  // 문제→솔루션 (weight: 6)
+
+export type CtaType =
+  | 'urgency'            // 긴급성 CTA (weight: 10)
+  | 'price_anchor'       // 가격앵커 CTA (weight: 8)
+  | 'soft';              // 부드러운 CTA (weight: 7)
+
+export interface PatternSelection {
+  hook: HookType;
+  body: BodyType;
+  cta: CtaType;
 }
 
-export const AGENTS: Record<AgentId, Agent> = {
-  SPEC: {
-    id: 'SPEC',
-    name: 'SPEC_AGENT',
-    icon: '📊',
-    color: '#3B82F6', // blue
-    role: '스펙 분석 전문가',
-  },
-  REVIEW: {
-    id: 'REVIEW',
-    name: 'REVIEW_AGENT',
-    icon: '💬',
-    color: '#10B981', // green
-    role: '리뷰 분석 전문가',
-  },
-  STYLE: {
-    id: 'STYLE',
-    name: 'STYLE_AGENT',
-    icon: '✍️',
-    color: '#8B5CF6', // purple
-    role: '대본 스타일 코치',
-  },
-  PRICE: {
-    id: 'PRICE',
-    name: 'PRICE_AGENT',
-    icon: '💰',
-    color: '#EC4899', // pink
-    role: '쿠팡 가격 분석 전문가',
-  },
-  BOSS: {
-    id: 'BOSS',
-    name: 'BOSS_AGENT',
-    icon: '🎯',
-    color: '#EF4444', // red
-    role: '총괄 및 대본 작성자',
-  },
-  USER: {
-    id: 'USER',
-    name: '나',
-    icon: '👤',
-    color: '#F59E0B', // amber
-    role: '프로듀서',
-  },
-};
-
-export type MessageType =
-  | 'analysis'
-  | 'opinion'
-  | 'question'
-  | 'rebuttal'
-  | 'consensus'
-  | 'final_script'
-  | 'user_input'
-  | 'revision_request';
-
-export interface AgentMessage {
-  id: string;
-  agentId: AgentId;
-  content: string;
-  timestamp: Date;
-  replyTo?: string;
-  messageType: MessageType;
-  mentions?: AgentId[];
+export interface PatternHistory {
+  recentHooks: HookType[];
+  recentBodies: BodyType[];
+  recentCtas: CtaType[];
+  totalGenerated: number;
 }
 
-export interface InputFiles {
+// ===== 입출력 타입 =====
+
+export interface ScriptInput {
   productInfo: string;
   reviews: string;
-  priceData?: {
-    currentPrice: number;
-    lowestPrice: number;
-    purchaseCount: number;
-    discountRate: number;
-  };
-  priceImage?: string; // base64 encoded image
-  direction?: string; // 대본 작성 방향
+  priceImage?: string;     // base64 encoded image
 }
 
-export interface FinalScript {
+export interface ScriptOutput {
   titles: string[];
   script: string;
+  pattern: PatternSelection;
   duration: number;
   targetAudience: string;
-  keyPoints: string[];
 }
 
-export interface ConversationState {
-  messages: AgentMessage[];
-  currentRound: number;
-  isGenerating: boolean;
-  inputFiles: InputFiles | null;
-  finalScript: FinalScript | null;
-}
+// ===== 스트리밍 이벤트 =====
 
-// 스트리밍 이벤트 타입
 export type StreamEventType =
-  | 'round_start'
-  | 'agent_start'
-  | 'agent_chunk'
-  | 'agent_complete'
-  | 'round_complete'
-  | 'final_script'
+  | 'start'
+  | 'price_extracted'
+  | 'pattern_selected'
+  | 'chunk'
+  | 'complete'
   | 'error';
 
 export interface StreamEvent {
   type: StreamEventType;
-  agentId?: AgentId;
   content?: string;
-  messageType?: MessageType;
-  finalScript?: FinalScript;
-  round?: number;
+  priceData?: string;
+  pattern?: PatternSelection;
+  output?: ScriptOutput;
   error?: string;
+}
+
+// ===== 스토어 =====
+
+export interface ScriptStore {
+  input: ScriptInput | null;
+  isGenerating: boolean;
+  streamingText: string;
+  output: ScriptOutput | null;
+  selectedPattern: PatternSelection | null;
+  priceData: string | null;
+  patternHistory: PatternHistory;
 }

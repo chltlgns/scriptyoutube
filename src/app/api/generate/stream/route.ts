@@ -1,30 +1,21 @@
 import { NextRequest } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
-import type { AgentId, AgentMessage, InputFiles, MessageType, FinalScript, StreamEvent } from '@/lib/types';
-import {
-  AGENT_SYSTEM_PROMPTS,
-  ORCHESTRATOR_SYSTEM_PROMPT,
-  buildAgentAnalysisPrompt,
-  buildDebatePrompt,
-  buildFinalScriptPrompt,
-  buildRevisionPrompt,
-} from '@/lib/prompts';
+import type { ScriptInput, ScriptOutput, StreamEvent, PatternSelection } from '@/lib/types';
+import { selectPattern, buildScriptPrompt, buildRevisionPrompt } from '@/lib/prompts';
 
 type MediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// SSE 이벤트 전송 헬퍼
 function createSendEvent(controller: ReadableStreamDefaultController, encoder: TextEncoder) {
   return (event: StreamEvent) => {
     controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
   };
 }
 
-// 이미지 콘텐츠 블록 생성
-function buildImageContent(priceImage: string) {
+// Vision API로 가격 이미지에서 데이터 추출
+async function extractPriceFromImage(
+  anthropic: Anthropic,
+  priceImage: string,
+): Promise<string> {
   const base64Data = priceImage.replace(/^data:image\/\w+;base64,/, '');
   const extractedType = priceImage.match(/^data:(image\/\w+);base64,/)?.[1];
   const validTypes: MediaType[] = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
@@ -32,347 +23,85 @@ function buildImageContent(priceImage: string) {
     ? (extractedType as MediaType)
     : 'image/png';
 
-  return {
-    type: 'image' as const,
-    source: {
-      type: 'base64' as const,
-      media_type: mediaType,
-      data: base64Data,
-    },
-  };
-}
-
-// 개별 에이전트 호출 (스트리밍)
-async function callAgentWithStreaming(
-  anthropic: Anthropic,
-  agentId: AgentId,
-  systemPrompt: string,
-  userMessage: string,
-  sendEvent: (event: StreamEvent) => void,
-  imageContent?: ReturnType<typeof buildImageContent>,
-): Promise<string> {
-  sendEvent({ type: 'agent_start', agentId });
-
-  const content: Anthropic.MessageCreateParams['messages'][0]['content'] = [];
-
-  if (imageContent && agentId === 'PRICE') {
-    content.push(imageContent);
-  }
-  content.push({ type: 'text', text: userMessage });
-
-  const stream = anthropic.messages.stream({
+  const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
-    system: systemPrompt,
-    messages: [{ role: 'user', content }],
-    max_tokens: 1024,
+    max_tokens: 512,
+    messages: [{
+      role: 'user',
+      content: [
+        {
+          type: 'image',
+          source: { type: 'base64', media_type: mediaType, data: base64Data },
+        },
+        {
+          type: 'text',
+          text: `이 가격 변동 그래프 이미지를 분석해주세요. 다음 정보를 추출해서 한 줄로 요약해주세요:
+- 제품명
+- 현재가
+- 최저가
+- 최고가
+- 가격 변동 추이 (상승/하락/안정, 변동폭, 기간)
+- 총 데이터 포인트 수
+
+형식: "제품: [이름] / 현재가: [X]원 / 최저가: [Y]원 / 최고가: [Z]원 / 추이: [설명]"
+텍스트만 반환하고 다른 설명은 하지 마세요.`,
+        },
+      ],
+    }],
   });
 
-  let fullContent = '';
-  for await (const event of stream) {
-    if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-      fullContent += event.delta.text;
-      sendEvent({ type: 'agent_chunk', agentId, content: event.delta.text });
-    }
-  }
-
-  sendEvent({ type: 'agent_complete', agentId, content: fullContent, messageType: 'analysis' });
-  return fullContent;
+  const textBlock = response.content.find(b => b.type === 'text');
+  return textBlock ? textBlock.text : '가격 데이터를 추출할 수 없습니다';
 }
 
-// 재시도 래퍼
-async function callAgentWithRetry(
-  anthropic: Anthropic,
-  agentId: AgentId,
-  systemPrompt: string,
-  userMessage: string,
-  sendEvent: (event: StreamEvent) => void,
-  imageContent?: ReturnType<typeof buildImageContent>,
-  maxRetries = 1,
-): Promise<string | null> {
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      return await callAgentWithStreaming(anthropic, agentId, systemPrompt, userMessage, sendEvent, imageContent);
-    } catch (error) {
-      if (attempt === maxRetries) {
-        const msg = error instanceof Error ? error.message : String(error);
-        sendEvent({ type: 'error', agentId, error: `${agentId} 분석 실패: ${msg}` });
-        return null;
-      }
-      await sleep(1000 * (attempt + 1));
-    }
-  }
-  return null;
-}
-
-// Round 1: 병렬 에이전트 실행
-async function executeRound1Parallel(
-  anthropic: Anthropic,
-  sendEvent: (event: StreamEvent) => void,
-  inputFiles: InputFiles,
-): Promise<AgentMessage[]> {
-  sendEvent({ type: 'round_start', round: 1 });
-
-  const hasPriceInfo = inputFiles.priceData || inputFiles.priceImage;
-  const agents: AgentId[] = ['SPEC', 'REVIEW', ...(hasPriceInfo ? ['PRICE' as AgentId] : []), 'STYLE'];
-
-  const imageContent = inputFiles.priceImage ? buildImageContent(inputFiles.priceImage) : undefined;
-
-  const promises = agents.map((agentId) =>
-    callAgentWithRetry(
-      anthropic,
-      agentId,
-      AGENT_SYSTEM_PROMPTS[agentId],
-      buildAgentAnalysisPrompt(agentId, inputFiles),
-      sendEvent,
-      imageContent,
-    ),
-  );
-
-  const results = await Promise.allSettled(promises);
-
-  const messages: AgentMessage[] = [];
-  results.forEach((result, index) => {
-    const content = result.status === 'fulfilled' ? result.value : null;
-    if (content) {
-      messages.push({
-        id: `1-${agents[index]}-${Date.now()}`,
-        agentId: agents[index],
-        content,
-        timestamp: new Date(),
-        messageType: 'analysis',
-      });
-    }
-  });
-
-  sendEvent({ type: 'round_complete', round: 1 });
-  return messages;
-}
-
-// Round 2: 오케스트레이터 토론 (1 API 호출)
-async function executeRound2Debate(
-  anthropic: Anthropic,
-  sendEvent: (event: StreamEvent) => void,
-  inputFiles: InputFiles,
-  previousMessages: AgentMessage[],
-): Promise<AgentMessage[]> {
-  sendEvent({ type: 'round_start', round: 2 });
-  sendEvent({ type: 'agent_start', agentId: 'BOSS' });
-
-  const userPrompt = buildDebatePrompt(previousMessages, inputFiles);
-
-  const stream = anthropic.messages.stream({
-    model: 'claude-sonnet-4-20250514',
-    system: ORCHESTRATOR_SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: userPrompt }],
-    max_tokens: 4096,
-  });
-
-  let fullContent = '';
-  for await (const event of stream) {
-    if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-      fullContent += event.delta.text;
-      sendEvent({ type: 'agent_chunk', agentId: 'BOSS', content: event.delta.text });
-    }
-  }
-
-  sendEvent({ type: 'agent_complete', agentId: 'BOSS', content: fullContent });
-
-  // JSON 파싱하여 개별 메시지 추출
-  const messages = parseAgentMessages(fullContent, 2);
-
-  // 각 에이전트별 완료 이벤트 전송
-  for (const msg of messages) {
-    sendEvent({ type: 'agent_complete', agentId: msg.agentId, content: msg.content, messageType: msg.messageType });
-  }
-
-  sendEvent({ type: 'round_complete', round: 2 });
-  return messages;
-}
-
-// Round 3: BOSS 최종 대본 (extended thinking 대신 단일 호출)
-async function executeRound3Final(
-  anthropic: Anthropic,
-  sendEvent: (event: StreamEvent) => void,
-  inputFiles: InputFiles,
-  previousMessages: AgentMessage[],
-): Promise<{ messages: AgentMessage[]; finalScript: FinalScript | null }> {
-  sendEvent({ type: 'round_start', round: 3 });
-  sendEvent({ type: 'agent_start', agentId: 'BOSS' });
-
-  const userPrompt = buildFinalScriptPrompt(previousMessages, inputFiles);
-
-  const stream = anthropic.messages.stream({
-    model: 'claude-sonnet-4-20250514',
-    system: AGENT_SYSTEM_PROMPTS['BOSS'],
-    messages: [{ role: 'user', content: userPrompt }],
-    max_tokens: 4096,
-  });
-
-  let fullContent = '';
-  for await (const event of stream) {
-    if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-      fullContent += event.delta.text;
-      sendEvent({ type: 'agent_chunk', agentId: 'BOSS', content: event.delta.text });
-    }
-  }
-
-  const bossMessage: AgentMessage = {
-    id: `3-BOSS-${Date.now()}`,
-    agentId: 'BOSS',
-    content: fullContent,
-    timestamp: new Date(),
-    messageType: 'final_script',
-  };
-
-  sendEvent({ type: 'agent_complete', agentId: 'BOSS', content: fullContent, messageType: 'final_script' });
-
-  // 최종 대본 추출
-  const finalScript: FinalScript = {
-    titles: extractTitles(fullContent),
-    script: extractScript(fullContent),
-    duration: 40,
-    targetAudience: extractTarget(fullContent),
-    keyPoints: extractKeyPoints(fullContent),
-  };
-
-  sendEvent({ type: 'final_script', finalScript });
-  sendEvent({ type: 'round_complete', round: 3 });
-
-  return { messages: [bossMessage], finalScript };
-}
-
-// 수정 요청 실행
-async function executeRevision(
-  anthropic: Anthropic,
-  sendEvent: (event: StreamEvent) => void,
-  inputFiles: InputFiles,
-  previousMessages: AgentMessage[],
-  userFeedback: string,
-): Promise<{ messages: AgentMessage[]; finalScript: FinalScript | null }> {
-  sendEvent({ type: 'round_start', round: 4 });
-  sendEvent({ type: 'agent_start', agentId: 'BOSS' });
-
-  const userPrompt = buildRevisionPrompt(previousMessages, inputFiles, userFeedback);
-
-  const stream = anthropic.messages.stream({
-    model: 'claude-sonnet-4-20250514',
-    system: AGENT_SYSTEM_PROMPTS['BOSS'],
-    messages: [{ role: 'user', content: userPrompt }],
-    max_tokens: 4096,
-  });
-
-  let fullContent = '';
-  for await (const event of stream) {
-    if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-      fullContent += event.delta.text;
-      sendEvent({ type: 'agent_chunk', agentId: 'BOSS', content: event.delta.text });
-    }
-  }
-
-  const bossMessage: AgentMessage = {
-    id: `revision-BOSS-${Date.now()}`,
-    agentId: 'BOSS',
-    content: fullContent,
-    timestamp: new Date(),
-    messageType: 'final_script',
-  };
-
-  sendEvent({ type: 'agent_complete', agentId: 'BOSS', content: fullContent, messageType: 'final_script' });
-
-  const finalScript: FinalScript = {
-    titles: extractTitles(fullContent),
-    script: extractScript(fullContent),
-    duration: 40,
-    targetAudience: extractTarget(fullContent),
-    keyPoints: extractKeyPoints(fullContent),
-  };
-
-  sendEvent({ type: 'final_script', finalScript });
-  sendEvent({ type: 'round_complete', round: 4 });
-
-  return { messages: [bossMessage], finalScript };
-}
-
-// JSON 파싱: 오케스트레이터 응답 → 개별 메시지
-function parseAgentMessages(text: string, round: number): AgentMessage[] {
-  const jsonMatch = text.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) {
-    // JSON 못 찾으면 전체를 BOSS 메시지로 처리
-    return [{
-      id: `${round}-BOSS-${Date.now()}`,
-      agentId: 'BOSS',
-      content: text,
-      timestamp: new Date(),
-      messageType: 'opinion',
-    }];
-  }
-
-  try {
-    const parsed = JSON.parse(jsonMatch[0]) as Array<{
-      agentId: AgentId;
-      content: string;
-      messageType: MessageType;
-      mentions?: AgentId[];
-    }>;
-
-    return parsed.map((m, index) => ({
-      id: `${round}-${m.agentId}-${index}-${Date.now()}`,
-      agentId: m.agentId,
-      content: m.content,
-      timestamp: new Date(),
-      messageType: m.messageType,
-      mentions: m.mentions,
-    }));
-  } catch {
-    return [{
-      id: `${round}-BOSS-${Date.now()}`,
-      agentId: 'BOSS',
-      content: text,
-      timestamp: new Date(),
-      messageType: 'opinion',
-    }];
-  }
-}
-
-// 헬퍼 함수들 (기존 route.ts에서 이전)
-function extractTitles(content: string): string[] {
-  const titleSection = content.match(/제목[^:]*[:：]([^#\n]*(?:\n[^#\n]*)*)/i);
+// 대본 결과 파싱
+function parseScriptOutput(content: string, pattern: PatternSelection): ScriptOutput {
+  // 제목 추출 - "제목 후보:" 또는 "## 제목 후보" 패턴 모두 처리
+  const titleSection = content.match(/제목\s*후보[^:\n]*[:：]\s*([\s\S]*?)(?=\n대본[:\s]|\n##\s*대본|$)/i);
+  let titles: string[] = [];
   if (titleSection) {
-    const titles = titleSection[1]
+    titles = titleSection[1]
       .split('\n')
-      .map((line) => line.replace(/^\d+[\.\)]\s*/, '').trim())
-      .filter((line) => line.length > 0)
-      .slice(0, 3);
-    if (titles.length > 0) return titles;
+      .map(line => line.replace(/^#+\s*/, '').replace(/^\d+[\.\)]\s*/, '').replace(/^[-•]\s*/, '').trim())
+      .filter(line => line.length > 3 && line.length < 60 && !line.startsWith('제목'));
   }
-  return ['제목 후보 1', '제목 후보 2', '제목 후보 3'];
-}
-
-function extractScript(content: string): string {
-  const scriptMatch = content.match(/대본[^:]*[:：]\s*([\s\S]*?)(?=---|##|핵심|타겟|$)/i);
-  if (scriptMatch) {
-    return scriptMatch[1].trim();
-  }
-  return content.replace(/제목[^:]*[:：][^#]*/gi, '').trim();
-}
-
-function extractTarget(content: string): string {
-  const targetMatch = content.match(/타겟[^:]*[:：]\s*([^\n#]+)/i);
-  return targetMatch ? targetMatch[1].trim() : '가성비 제품을 찾는 20-30대';
-}
-
-function extractKeyPoints(content: string): string[] {
-  const points: string[] = [];
-  const lines = content.split('\n');
-  for (const line of lines) {
-    if (line.match(/^[-•]\s+/) || line.match(/^\d\.\s+/)) {
-      const point = line.replace(/^[-•\d.]+\s+/, '').trim();
-      if (point.length > 5 && point.length < 100) {
-        points.push(point);
-      }
+  if (titles.length === 0) {
+    // fallback: 번호 매겨진 줄 찾기
+    const numbered = content.match(/^\d+\.\s+.{5,55}$/gm);
+    if (numbered) {
+      titles = numbered.slice(0, 3).map(l => l.replace(/^\d+\.\s+/, '').trim());
     }
   }
-  return points.slice(0, 5) || ['가성비', '쿨링 성능', '성능'];
+  if (titles.length === 0) titles = ['제목 후보 1', '제목 후보 2', '제목 후보 3'];
+
+  // 대본 추출 - "대본:" 또는 "## 대본" 이후 ~ "타겟:" 또는 "패턴 선택 이유:" 전까지
+  const scriptMatch = content.match(/(?:^|\n)(?:##\s*)?대본[:\s]\s*([\s\S]*?)(?=\n(?:##\s*)?타겟[:\s]|\n(?:##\s*)?패턴\s*선택\s*이유[:\s]|$)/i);
+  let script = '';
+  if (scriptMatch) {
+    script = scriptMatch[1]
+      .replace(/^#+\s*/gm, '')  // ## 마크다운 헤더 제거
+      .trim();
+  } else {
+    // fallback: [0-4초] 패턴으로 시작하는 부분부터 추출
+    const timeMatch = content.match(/(\[0-\d초\][\s\S]*?)(?=\n타겟|\n패턴\s*선택|$)/i);
+    script = timeMatch ? timeMatch[1].trim() : content.trim();
+  }
+
+  // 타겟 추출
+  const targetMatch = content.match(/(?:^|\n)(?:##\s*)?타겟[:\s]\s*([^\n]+)/i);
+  const targetAudience = targetMatch ? targetMatch[1].trim() : '노트북 구매를 고민하는 20-30대';
+
+  // 패턴 선택 이유 추출 (대본에 포함하지 않고 별도 필드로)
+  const reasonMatch = content.match(/패턴\s*선택\s*이유[:\s]\s*([\s\S]*?)$/i);
+  const patternReason = reasonMatch ? reasonMatch[1].trim() : '';
+
+  return {
+    titles: titles.slice(0, 3),
+    script: patternReason ? `${script}\n\n---\n패턴 선택 이유: ${patternReason}` : script,
+    pattern,
+    duration: 27,
+    targetAudience,
+  };
 }
 
 export async function POST(request: NextRequest) {
@@ -387,11 +116,11 @@ export async function POST(request: NextRequest) {
   const anthropic = new Anthropic({ apiKey });
 
   let body: {
-    inputFiles: InputFiles;
-    round: number;
-    previousMessages: AgentMessage[];
-    userFeedback?: string;
+    input: ScriptInput;
+    patternHistory?: PatternSelection[];
     isRevision?: boolean;
+    previousScript?: string;
+    feedback?: string;
   };
 
   try {
@@ -403,7 +132,7 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const { inputFiles, round, previousMessages, userFeedback, isRevision } = body;
+  const { input, patternHistory, isRevision, previousScript, feedback } = body;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -411,18 +140,70 @@ export async function POST(request: NextRequest) {
       const sendEvent = createSendEvent(controller, encoder);
 
       try {
-        if (isRevision && userFeedback) {
-          await executeRevision(anthropic, sendEvent, inputFiles, previousMessages, userFeedback);
-        } else if (round === 1) {
-          await executeRound1Parallel(anthropic, sendEvent, inputFiles);
-        } else if (round === 2) {
-          await executeRound2Debate(anthropic, sendEvent, inputFiles, previousMessages);
-        } else if (round === 3) {
-          await executeRound3Final(anthropic, sendEvent, inputFiles, previousMessages);
+        sendEvent({ type: 'start' });
+
+        // Step 1: 가격 이미지 분석 (있으면)
+        let priceData = '';
+        if (input.priceImage) {
+          priceData = await extractPriceFromImage(anthropic, input.priceImage);
+          sendEvent({ type: 'price_extracted', priceData });
+        }
+
+        if (isRevision && previousScript && feedback) {
+          // 수정 요청
+          const revisionPrompt = buildRevisionPrompt(previousScript, feedback, priceData);
+
+          const revStream = anthropic.messages.stream({
+            model: 'claude-sonnet-4-20250514',
+            system: revisionPrompt.system,
+            messages: [{ role: 'user', content: revisionPrompt.user }],
+            max_tokens: 2048,
+          });
+
+          let fullContent = '';
+          for await (const event of revStream) {
+            if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+              fullContent += event.delta.text;
+              sendEvent({ type: 'chunk', content: event.delta.text });
+            }
+          }
+
+          // 수정본에서는 기존 패턴 유지
+          const output = parseScriptOutput(fullContent, { hook: 'problem_empathy', body: 'experience', cta: 'urgency' });
+          sendEvent({ type: 'complete', output });
+        } else {
+          // Step 2: 패턴 선택
+          const recentPatterns = (patternHistory || []).slice(-3);
+          const pattern = selectPattern(recentPatterns);
+          sendEvent({ type: 'pattern_selected', pattern });
+
+          // Step 3: 프롬프트 조립 + 대본 생성
+          const prompt = buildScriptPrompt(pattern, priceData);
+
+          const userMessage = `## 제품 정보\n${input.productInfo}\n\n## 리뷰 데이터\n${input.reviews}`;
+
+          const genStream = anthropic.messages.stream({
+            model: 'claude-sonnet-4-20250514',
+            system: prompt,
+            messages: [{ role: 'user', content: userMessage }],
+            max_tokens: 2048,
+          });
+
+          let fullContent = '';
+          for await (const event of genStream) {
+            if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+              fullContent += event.delta.text;
+              sendEvent({ type: 'chunk', content: event.delta.text });
+            }
+          }
+
+          // Step 4: 결과 파싱
+          const output = parseScriptOutput(fullContent, pattern);
+          sendEvent({ type: 'complete', output });
         }
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
-        sendEvent({ type: 'error', error: `스트리밍 오류: ${msg}` });
+        sendEvent({ type: 'error', error: `생성 오류: ${msg}` });
       } finally {
         controller.close();
       }
