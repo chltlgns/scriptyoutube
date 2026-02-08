@@ -1,23 +1,54 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
-import type { ScriptInput } from '@/lib/types';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import type { ScriptInput, CrawlState } from '@/lib/types';
 
 interface FileUploadProps {
   onGenerate: (input: ScriptInput) => void;
+  onCrawl: (url: string) => Promise<void>;
+  crawlState: CrawlState;
+  crawledData?: { productInfo: string; reviews: string } | null;
   isDisabled: boolean;
 }
 
-export function FileUpload({ onGenerate, isDisabled }: FileUploadProps) {
+export function FileUpload({ onGenerate, onCrawl, crawlState, crawledData, isDisabled }: FileUploadProps) {
   const [productInfo, setProductInfo] = useState('');
   const [reviews, setReviews] = useState('');
   const [priceImage, setPriceImage] = useState('');
   const [priceImagePreview, setPriceImagePreview] = useState('');
   const [isDragging, setIsDragging] = useState(false);
+  const [coupangUrl, setCoupangUrl] = useState('');
 
   const productFileRef = useRef<HTMLInputElement>(null);
   const reviewFileRef = useRef<HTMLInputElement>(null);
   const priceImageRef = useRef<HTMLInputElement>(null);
+
+  // 크롤링 결과를 textarea에 반영
+  useEffect(() => {
+    if (crawledData) {
+      setProductInfo(crawledData.productInfo);
+      setReviews(crawledData.reviews);
+    }
+  }, [crawledData]);
+
+  // URL 유효성 검사
+  const isValidCoupangUrl = (url: string) => {
+    try {
+      const parsed = new URL(url);
+      return parsed.hostname === 'www.coupang.com' || parsed.hostname === 'coupang.com';
+    } catch {
+      return false;
+    }
+  };
+
+  const isCrawling = crawlState.step !== 'idle' && crawlState.step !== 'error';
+  const canCrawl = coupangUrl.trim() && isValidCoupangUrl(coupangUrl) && !isCrawling && !isDisabled;
+
+  const handleCrawlClick = () => {
+    if (canCrawl) {
+      onCrawl(coupangUrl);
+    }
+  };
 
   const handleFileRead = (file: File, setter: (content: string) => void) => {
     const reader = new FileReader();
@@ -73,6 +104,72 @@ export function FileUpload({ onGenerate, isDisabled }: FileUploadProps) {
       <h2 className="text-xl font-bold text-white">
         데이터 입력
       </h2>
+
+      {/* 쿠팡 URL 자동 수집 */}
+      <div className="space-y-3">
+        <label className="text-sm font-medium text-gray-300">
+          쿠팡 URL 자동 수집
+        </label>
+        <div className="flex gap-2">
+          <input
+            type="url"
+            value={coupangUrl}
+            onChange={(e) => setCoupangUrl(e.target.value)}
+            placeholder="https://www.coupang.com/vp/products/..."
+            disabled={isCrawling || isDisabled}
+            className="flex-1 bg-gray-800 rounded-lg px-4 py-3 text-white text-sm placeholder-gray-500 border border-gray-700 focus:border-orange-500 focus:outline-none disabled:opacity-50"
+            onKeyDown={(e) => { if (e.key === 'Enter' && canCrawl) handleCrawlClick(); }}
+          />
+          <button
+            onClick={handleCrawlClick}
+            disabled={!canCrawl}
+            className={`px-5 py-3 rounded-lg font-medium text-sm whitespace-nowrap transition-all ${
+              canCrawl
+                ? 'bg-orange-500 hover:bg-orange-600 text-white'
+                : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+            }`}
+          >
+            {isCrawling ? '수집 중...' : '자동 수집'}
+          </button>
+        </div>
+
+        {/* 프로그레스 바 + 상태 메시지 */}
+        {crawlState.step !== 'idle' && (
+          <div className="space-y-2">
+            {/* 프로그레스 바 */}
+            {crawlState.step !== 'error' && (
+              <div className="w-full bg-gray-700 rounded-full h-2 overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-700 ease-out ${
+                    crawlState.step === 'done' ? 'bg-green-500' : 'bg-orange-500'
+                  }`}
+                  style={{ width: `${crawlState.progress}%` }}
+                />
+              </div>
+            )}
+            {/* 상태 메시지 */}
+            <p className={`text-xs ${
+              crawlState.step === 'error' ? 'text-red-400' :
+              crawlState.step === 'done' ? 'text-green-400' :
+              'text-orange-300'
+            }`}>
+              {crawlState.step === 'validating' && '🔍 '}
+              {crawlState.step === 'crawling' && '📦 '}
+              {crawlState.step === 'filling' && '✏️ '}
+              {crawlState.step === 'done' && '✅ '}
+              {crawlState.step === 'error' && '❌ '}
+              {crawlState.message}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* 구분선 */}
+      <div className="flex items-center gap-3">
+        <div className="flex-1 border-t border-gray-700" />
+        <span className="text-xs text-gray-500">또는 직접 입력</span>
+        <div className="flex-1 border-t border-gray-700" />
+      </div>
 
       {/* 제품 정보 */}
       <div className="space-y-2">

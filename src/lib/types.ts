@@ -69,6 +69,25 @@ export interface StreamEvent {
   error?: string;
 }
 
+// ===== 크롤링 =====
+
+export type CrawlStep = 'idle' | 'validating' | 'crawling' | 'filling' | 'done' | 'error';
+
+export interface CrawlState {
+  step: CrawlStep;
+  message: string;
+  progress: number;
+}
+
+export interface CrawlResponse {
+  success: boolean;
+  productName: string;
+  productInfo: string;
+  reviews: string;
+  productInfoFile: string;
+  reviewFile: string;
+}
+
 // ===== 스토어 =====
 
 export interface ScriptStore {

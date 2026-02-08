@@ -3,10 +3,14 @@
 import { FileUpload } from '@/components/FileUpload';
 import { ScriptOutput } from '@/components/ScriptOutput';
 import { useScriptStore } from '@/lib/store';
-import type { ScriptInput, StreamEvent } from '@/lib/types';
+import type { ScriptInput, StreamEvent, CrawlState, CrawlResponse } from '@/lib/types';
+import { useState, useRef } from 'react';
 
 export default function Home() {
   const store = useScriptStore();
+  const [crawlState, setCrawlState] = useState<CrawlState>({ step: 'idle', message: '', progress: 0 });
+  const [crawledData, setCrawledData] = useState<{ productInfo: string; reviews: string } | null>(null);
+  const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const processSSEStream = async (response: Response) => {
     const reader = response.body!.getReader();
@@ -47,6 +51,80 @@ export default function Home() {
               break;
           }
         } catch { /* ignore parse errors */ }
+      }
+    }
+  };
+
+  const handleCrawl = async (url: string) => {
+    // 1. validating
+    setCrawlState({ step: 'validating', message: 'URL 검증 중...', progress: 10 });
+    setCrawledData(null);
+
+    // 2. start crawling with progress animation
+    setCrawlState({ step: 'crawling', message: '쿠팡에서 데이터 수집 중... (최대 3분)', progress: 15 });
+
+    // 시간 기반 프로그레스 (15% → 80%, 180초에 걸쳐)
+    let currentProgress = 15;
+    progressIntervalRef.current = setInterval(() => {
+      currentProgress = Math.min(currentProgress + 0.5, 80);
+      setCrawlState(prev => ({ ...prev, progress: currentProgress }));
+    }, 1500);
+
+    try {
+      const response = await fetch('/api/crawl', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+
+      // 프로그레스 타이머 정리
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+
+      if (!response.ok) {
+        const error = await response.json();
+        const errorMsg = error.error || error.detail || '크롤링 실패';
+        setCrawlState({ step: 'error', message: errorMsg, progress: 0 });
+        return;
+      }
+
+      const data: CrawlResponse = await response.json();
+
+      if (!data.success || (!data.productInfo && !data.reviews)) {
+        setCrawlState({ step: 'error', message: '데이터를 수집하지 못했습니다.', progress: 0 });
+        return;
+      }
+
+      // 3. filling
+      setCrawlState({ step: 'filling', message: '데이터 채우는 중...', progress: 90 });
+      const crawled = { productInfo: data.productInfo, reviews: data.reviews };
+      setCrawledData(crawled);
+
+      // 4. done
+      setCrawlState({ step: 'done', message: `수집 완료! (${data.productName})`, progress: 100 });
+
+      // 5. 1초 후 자동 대본 생성
+      setTimeout(() => {
+        handleGenerate({
+          productInfo: crawled.productInfo,
+          reviews: crawled.reviews,
+        });
+        // 크롤 상태 리셋
+        setCrawlState({ step: 'idle', message: '', progress: 0 });
+      }, 1000);
+
+    } catch (error) {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+      const msg = error instanceof Error ? error.message : '알 수 없는 오류';
+      if (msg.includes('fetch') || msg.includes('network') || msg.includes('Failed')) {
+        setCrawlState({ step: 'error', message: '크롤러 서버에 연결할 수 없습니다. start-crawler.bat을 실행해주세요.', progress: 0 });
+      } else {
+        setCrawlState({ step: 'error', message: `크롤링 오류: ${msg}`, progress: 0 });
       }
     }
   };
@@ -132,6 +210,9 @@ export default function Home() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <FileUpload
             onGenerate={handleGenerate}
+            onCrawl={handleCrawl}
+            crawlState={crawlState}
+            crawledData={crawledData}
             isDisabled={store.isGenerating}
           />
           <ScriptOutput
