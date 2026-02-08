@@ -105,15 +105,10 @@ export default function Home() {
       // 4. done
       setCrawlState({ step: 'done', message: `수집 완료! (${data.productName})`, progress: 100 });
 
-      // 5. 1초 후 자동 대본 생성
+      // 3초 후 크롤 상태 리셋 (사용자가 데이터 확인 후 수동으로 대본 생성)
       setTimeout(() => {
-        handleGenerate({
-          productInfo: crawled.productInfo,
-          reviews: crawled.reviews,
-        });
-        // 크롤 상태 리셋
         setCrawlState({ step: 'idle', message: '', progress: 0 });
-      }, 1000);
+      }, 3000);
 
     } catch (error) {
       if (progressIntervalRef.current) {
