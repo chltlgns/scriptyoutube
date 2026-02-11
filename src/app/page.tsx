@@ -135,13 +135,17 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           input,
-          patternHistory: store.patternHistory ? [
-            ...store.patternHistory.recentHooks.slice(-3).map((h, i) => ({
-              hook: h,
-              body: store.patternHistory.recentBodies[store.patternHistory.recentBodies.length - 3 + i] || 'experience',
-              cta: store.patternHistory.recentCtas[store.patternHistory.recentCtas.length - 3 + i] || 'urgency',
-            }))
-          ] : [],
+          patternHistory: store.patternHistory ? (() => {
+            const hooks = store.patternHistory.recentHooks;
+            const bodies = store.patternHistory.recentBodies;
+            const ctas = store.patternHistory.recentCtas;
+            const len = Math.min(hooks.length, bodies.length, ctas.length);
+            return Array.from({ length: Math.min(len, 5) }, (_, i) => ({
+              hook: hooks[hooks.length - Math.min(len, 5) + i],
+              body: bodies[bodies.length - Math.min(len, 5) + i],
+              cta: ctas[ctas.length - Math.min(len, 5) + i],
+            }));
+          })() : [],
         }),
       });
 

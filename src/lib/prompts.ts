@@ -28,23 +28,23 @@ const CTA_WEIGHTS: Record<CtaType, number> = {
 
 // ===== 검증된 고성과 조합 (Golden Combos) =====
 // 보고서 데이터에서 검증된 최적 조합
-const GOLDEN_COMBOS: Array<{ hook: HookType; body: BodyType; cta: CtaType; avgViews: number }> = [
+const GOLDEN_COMBOS: Array<{ hook: HookType; body: BodyType; cta: CtaType; avgViews: number; weight: number }> = [
   // Template A: 문제공감 + 체험 + 긴급CTA (보고서2 최고 성과)
-  { hook: 'problem_empathy', body: 'experience', cta: 'urgency', avgViews: 22464 },
+  { hook: 'problem_empathy', body: 'experience', cta: 'urgency', avgViews: 22464, weight: 18 },
   // Template A 변형: 문제공감 + 스펙체험 혼합
-  { hook: 'problem_empathy', body: 'spec_experience', cta: 'urgency', avgViews: 18000 },
+  { hook: 'problem_empathy', body: 'spec_experience', cta: 'urgency', avgViews: 18000, weight: 16 },
   // 반문 + 체험 (반문형 avg 14,080 + 체험 avg 14,818)
-  { hook: 'rhetorical', body: 'experience', cta: 'urgency', avgViews: 14080 },
+  { hook: 'rhetorical', body: 'experience', cta: 'urgency', avgViews: 14080, weight: 14 },
   // Template B: FOMO + 스펙체험 + 긴급CTA
-  { hook: 'fomo_urgency', body: 'spec_experience', cta: 'urgency', avgViews: 13805 },
+  { hook: 'fomo_urgency', body: 'spec_experience', cta: 'urgency', avgViews: 13805, weight: 13 },
   // FOMO + 체험
-  { hook: 'fomo_urgency', body: 'experience', cta: 'urgency', avgViews: 12847 },
+  { hook: 'fomo_urgency', body: 'experience', cta: 'urgency', avgViews: 12847, weight: 13 },
   // 가격충격 + 스펙체험 + 가격앵커
-  { hook: 'price_shock', body: 'spec_experience', cta: 'price_anchor', avgViews: 12692 },
+  { hook: 'price_shock', body: 'spec_experience', cta: 'price_anchor', avgViews: 12692, weight: 12 },
   // 질문 + 체험 + 부드러운CTA (보고서1 Template B)
-  { hook: 'question', body: 'experience', cta: 'soft', avgViews: 10000 },
+  { hook: 'question', body: 'experience', cta: 'soft', avgViews: 10000, weight: 11 },
   // 질문 + 스펙체험 + 긴급CTA
-  { hook: 'question', body: 'spec_experience', cta: 'urgency', avgViews: 9957 },
+  { hook: 'question', body: 'spec_experience', cta: 'urgency', avgViews: 9957, weight: 11 },
 ];
 
 // ===== 배제할 저성과 조합 =====
@@ -135,8 +135,8 @@ function weightedRandomSelect<T extends string>(
 // ===== 패턴 선택 알고리즘 =====
 
 export function selectPattern(recentPatterns: PatternSelection[]): PatternSelection {
-  const last3 = recentPatterns.slice(-3);
-  const recentCombos = last3.map(p => `${p.hook}-${p.body}-${p.cta}`);
+  const last5 = recentPatterns.slice(-5);
+  const recentCombos = last5.map(p => `${p.hook}-${p.body}-${p.cta}`);
 
   // 60% 확률로 검증된 고성과 조합(Golden Combo) 선택
   if (Math.random() < 0.6) {
@@ -147,11 +147,11 @@ export function selectPattern(recentPatterns: PatternSelection[]): PatternSelect
     });
 
     if (availableGolden.length > 0) {
-      // avgViews 기반 가중치 선택
-      const totalWeight = availableGolden.reduce((sum, c) => sum + c.avgViews, 0);
+      // weight 기반 가중치 선택
+      const totalWeight = availableGolden.reduce((sum, c) => sum + c.weight, 0);
       let random = Math.random() * totalWeight;
       for (const combo of availableGolden) {
-        random -= combo.avgViews;
+        random -= combo.weight;
         if (random <= 0) {
           return { hook: combo.hook, body: combo.body, cta: combo.cta };
         }
@@ -162,9 +162,9 @@ export function selectPattern(recentPatterns: PatternSelection[]): PatternSelect
   }
 
   // 40% 확률 또는 골든 콤보 소진 시: 가중치 랜덤 + 블랙리스트 배제
-  const recentHooks = last3.map((p) => p.hook);
-  const recentBodies = last3.map((p) => p.body);
-  const recentCtas = last3.map((p) => p.cta);
+  const recentHooks = last5.map((p) => p.hook);
+  const recentBodies = last5.map((p) => p.body);
+  const recentCtas = last5.map((p) => p.cta);
 
   // 최대 10회 시도로 밴 조합 회피
   for (let attempt = 0; attempt < 10; attempt++) {
