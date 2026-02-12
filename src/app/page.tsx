@@ -236,7 +236,7 @@ export default function Home() {
 
       <footer className="border-t border-gray-800 mt-8">
         <div className="max-w-6xl mx-auto px-4 py-4 text-center text-gray-600 text-sm">
-          패턴 기반 대본 생성 &middot; 25-30초 최적화
+          패턴 기반 대본 생성 &middot; 20-23초 최적화
         </div>
       </footer>
     </div>

@@ -154,7 +154,7 @@ function parseScriptOutput(content: string, pattern: PatternSelection): ScriptOu
     titles: titles.slice(0, 3),
     script: patternReason ? `${script}\n\n---\n패턴 선택 이유: ${patternReason}` : script,
     pattern,
-    duration: 27,
+    duration: 23,
     targetAudience,
   };
 }
