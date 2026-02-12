@@ -93,6 +93,7 @@ async function factCheckScript(
       return {
         passed: parsed.passed ?? true,
         issues: Array.isArray(parsed.issues) ? parsed.issues : [],
+        verifiedClaims: Array.isArray(parsed.verifiedClaims) ? parsed.verifiedClaims : [],
         correctedScript: parsed.correctedScript || undefined,
         searchesPerformed,
       };

@@ -47,6 +47,7 @@ export interface FactCheckIssue {
 export interface FactCheckResult {
   passed: boolean;
   issues: FactCheckIssue[];
+  verifiedClaims?: string[];
   correctedScript?: string;
   searchesPerformed: number;
 }

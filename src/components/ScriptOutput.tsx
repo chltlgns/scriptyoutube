@@ -84,9 +84,12 @@ function FactCheckBadge({ result }: { result: FactCheckResult }) {
 }
 
 function FactCheckDetails({ result }: { result: FactCheckResult }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
 
-  if (result.passed || result.issues.length === 0) return null;
+  const hasIssues = !result.passed && result.issues.length > 0;
+  const hasVerified = result.verifiedClaims && result.verifiedClaims.length > 0;
+
+  if (!hasIssues && !hasVerified) return null;
 
   return (
     <div className="space-y-2">
@@ -101,12 +104,30 @@ function FactCheckDetails({ result }: { result: FactCheckResult }) {
         >
           <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
         </svg>
-        팩트체크 상세
+        {hasIssues ? '팩트체크 상세' : '검증 내역'}
       </button>
 
       {expanded && (
         <div className="space-y-2">
-          {result.issues.map((issue, i) => {
+          {/* 검증 통과 항목 */}
+          {hasVerified && (
+            <div className="space-y-1">
+              {result.verifiedClaims!.map((claim, i) => (
+                <div
+                  key={i}
+                  className="flex items-start gap-2 px-3 py-2 bg-gray-800/50 rounded-lg"
+                >
+                  <svg className="w-3.5 h-3.5 text-green-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span className="text-gray-400 text-xs leading-relaxed">{claim}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* 이슈 항목 */}
+          {hasIssues && result.issues.map((issue, i) => {
             const config = severityConfig[issue.severity];
             return (
               <div
