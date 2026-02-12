@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ScriptInput, ScriptOutput, PatternSelection, PatternHistory } from './types';
+import type { ScriptInput, ScriptOutput, PatternSelection, PatternHistory, FactCheckResult } from './types';
 
 interface ScriptState {
   // Input
@@ -7,12 +7,14 @@ interface ScriptState {
 
   // Generation state
   isGenerating: boolean;
+  isFactChecking: boolean;
   streamingText: string;
 
   // Results
   output: ScriptOutput | null;
   selectedPattern: PatternSelection | null;
   priceData: string | null;
+  factCheckResult: FactCheckResult | null;
 
   // Pattern history (for rotation - persisted in localStorage)
   patternHistory: PatternHistory;
@@ -20,11 +22,13 @@ interface ScriptState {
   // Actions
   setInput: (input: ScriptInput) => void;
   setIsGenerating: (v: boolean) => void;
+  setIsFactChecking: (v: boolean) => void;
   appendStreamingText: (chunk: string) => void;
   clearStreamingText: () => void;
   setOutput: (output: ScriptOutput) => void;
   setSelectedPattern: (pattern: PatternSelection) => void;
   setPriceData: (data: string) => void;
+  setFactCheckResult: (result: FactCheckResult) => void;
   addToHistory: (pattern: PatternSelection) => void;
   reset: () => void;
 }
@@ -49,19 +53,23 @@ function saveHistory(history: PatternHistory) {
 export const useScriptStore = create<ScriptState>((set, get) => ({
   input: null,
   isGenerating: false,
+  isFactChecking: false,
   streamingText: '',
   output: null,
   selectedPattern: null,
   priceData: null,
+  factCheckResult: null,
   patternHistory: loadHistory(),
 
   setInput: (input) => set({ input }),
   setIsGenerating: (v) => set({ isGenerating: v }),
+  setIsFactChecking: (v) => set({ isFactChecking: v }),
   appendStreamingText: (chunk) => set((s) => ({ streamingText: s.streamingText + chunk })),
   clearStreamingText: () => set({ streamingText: '' }),
   setOutput: (output) => set({ output }),
   setSelectedPattern: (pattern) => set({ selectedPattern: pattern }),
   setPriceData: (data) => set({ priceData: data }),
+  setFactCheckResult: (result) => set({ factCheckResult: result }),
   addToHistory: (pattern) => {
     const current = get().patternHistory;
     const updated: PatternHistory = {
@@ -78,5 +86,7 @@ export const useScriptStore = create<ScriptState>((set, get) => ({
     output: null,
     selectedPattern: null,
     priceData: null,
+    factCheckResult: null,
+    isFactChecking: false,
   }),
 }));

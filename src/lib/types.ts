@@ -34,6 +34,23 @@ export interface PatternHistory {
   totalGenerated: number;
 }
 
+// ===== 팩트체크 타입 =====
+
+export interface FactCheckIssue {
+  claim: string;
+  severity: 'HIGH' | 'MEDIUM' | 'LOW';
+  issue: string;
+  correction: string;
+  source?: string;
+}
+
+export interface FactCheckResult {
+  passed: boolean;
+  issues: FactCheckIssue[];
+  correctedScript?: string;
+  searchesPerformed: number;
+}
+
 // ===== 입출력 타입 =====
 
 export interface ScriptInput {
@@ -48,6 +65,7 @@ export interface ScriptOutput {
   pattern: PatternSelection;
   duration: number;
   targetAudience: string;
+  factCheckResult?: FactCheckResult;
 }
 
 // ===== 스트리밍 이벤트 =====
@@ -57,6 +75,8 @@ export type StreamEventType =
   | 'price_extracted'
   | 'pattern_selected'
   | 'chunk'
+  | 'fact_check_start'
+  | 'fact_check_result'
   | 'complete'
   | 'error';
 
@@ -66,6 +86,7 @@ export interface StreamEvent {
   priceData?: string;
   pattern?: PatternSelection;
   output?: ScriptOutput;
+  factCheckResult?: FactCheckResult;
   error?: string;
 }
 
@@ -93,9 +114,11 @@ export interface CrawlResponse {
 export interface ScriptStore {
   input: ScriptInput | null;
   isGenerating: boolean;
+  isFactChecking: boolean;
   streamingText: string;
   output: ScriptOutput | null;
   selectedPattern: PatternSelection | null;
   priceData: string | null;
+  factCheckResult: FactCheckResult | null;
   patternHistory: PatternHistory;
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { ScriptOutput as ScriptOutputType, PatternSelection } from '@/lib/types';
+import type { ScriptOutput as ScriptOutputType, PatternSelection, FactCheckResult } from '@/lib/types';
 
 const hookLabels: Record<string, string> = {
   problem_empathy: '문제공감형',
@@ -27,13 +27,121 @@ const ctaLabels: Record<string, string> = {
   soft: '부드러운 CTA',
 };
 
+const severityConfig = {
+  HIGH: { bg: 'bg-red-500/15', border: 'border-red-500/30', text: 'text-red-400', label: 'HIGH' },
+  MEDIUM: { bg: 'bg-yellow-500/15', border: 'border-yellow-500/30', text: 'text-yellow-400', label: 'MED' },
+  LOW: { bg: 'bg-blue-500/15', border: 'border-blue-500/30', text: 'text-blue-400', label: 'LOW' },
+};
+
 interface ScriptOutputProps {
   output: ScriptOutputType | null;
   streamingText: string;
   selectedPattern: PatternSelection | null;
   priceData: string | null;
   isGenerating: boolean;
+  isFactChecking: boolean;
+  factCheckResult: FactCheckResult | null;
   onRevision: (feedback: string) => void;
+}
+
+function FactCheckBadge({ result }: { result: FactCheckResult }) {
+  if (result.passed) {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 bg-green-500/10 border border-green-500/20 rounded-lg">
+        <svg className="w-4 h-4 text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span className="text-green-400 text-sm font-medium">팩트체크 통과</span>
+        {result.searchesPerformed > 0 && (
+          <span className="text-green-400/60 text-xs">({result.searchesPerformed}회 웹검색)</span>
+        )}
+      </div>
+    );
+  }
+
+  const highCount = result.issues.filter(i => i.severity === 'HIGH').length;
+  const medCount = result.issues.filter(i => i.severity === 'MEDIUM').length;
+  const lowCount = result.issues.filter(i => i.severity === 'LOW').length;
+
+  return (
+    <div className="flex items-center gap-2 px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-lg">
+      <svg className="w-4 h-4 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+      </svg>
+      <span className="text-red-400 text-sm font-medium">
+        팩트체크 이슈 {result.issues.length}건
+      </span>
+      <div className="flex gap-1 text-xs">
+        {highCount > 0 && <span className="text-red-400">H:{highCount}</span>}
+        {medCount > 0 && <span className="text-yellow-400">M:{medCount}</span>}
+        {lowCount > 0 && <span className="text-blue-400">L:{lowCount}</span>}
+      </div>
+      {result.searchesPerformed > 0 && (
+        <span className="text-red-400/60 text-xs">({result.searchesPerformed}회 웹검색)</span>
+      )}
+    </div>
+  );
+}
+
+function FactCheckDetails({ result }: { result: FactCheckResult }) {
+  const [expanded, setExpanded] = useState(true);
+
+  if (result.passed || result.issues.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 text-sm font-medium text-gray-400 hover:text-gray-300 transition-colors"
+      >
+        <svg
+          className={`w-3 h-3 transition-transform ${expanded ? 'rotate-90' : ''}`}
+          fill="currentColor"
+          viewBox="0 0 20 20"
+        >
+          <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+        </svg>
+        팩트체크 상세
+      </button>
+
+      {expanded && (
+        <div className="space-y-2">
+          {result.issues.map((issue, i) => {
+            const config = severityConfig[issue.severity];
+            return (
+              <div
+                key={i}
+                className={`${config.bg} border ${config.border} rounded-lg p-3 space-y-1.5`}
+              >
+                <div className="flex items-start gap-2">
+                  <span className={`${config.text} text-xs font-bold px-1.5 py-0.5 rounded ${config.bg} flex-shrink-0 mt-0.5`}>
+                    {config.label}
+                  </span>
+                  <span className="text-gray-300 text-sm">&ldquo;{issue.claim}&rdquo;</span>
+                </div>
+                <p className="text-gray-400 text-xs pl-10">{issue.issue}</p>
+                <p className="text-gray-200 text-xs pl-10">
+                  <span className="text-gray-500">수정 &rarr; </span>
+                  {issue.correction}
+                </p>
+                {issue.source && (
+                  <p className="text-gray-500 text-xs pl-10 truncate">
+                    출처: {issue.source}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+
+          {result.correctedScript && (
+            <div className="text-xs text-amber-400/80 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+              HIGH 이슈가 감지되어 대본이 자동 수정되었습니다.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function ScriptOutput({
@@ -42,6 +150,8 @@ export function ScriptOutput({
   selectedPattern,
   priceData,
   isGenerating,
+  isFactChecking,
+  factCheckResult,
   onRevision,
 }: ScriptOutputProps) {
   const [copied, setCopied] = useState(false);
@@ -64,11 +174,11 @@ export function ScriptOutput({
     return (
       <div className="bg-gray-900 rounded-xl p-6 border border-gray-800 space-y-4">
         <h2 className="text-xl font-bold text-white flex items-center gap-3">
-          대본 생성 중
+          {isFactChecking ? '팩트체크 중' : '대본 생성 중'}
           <span className="flex gap-1">
-            <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-            <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-            <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+            <span className={`w-2 h-2 ${isFactChecking ? 'bg-amber-400' : 'bg-blue-400'} rounded-full animate-bounce`} style={{ animationDelay: '0ms' }} />
+            <span className={`w-2 h-2 ${isFactChecking ? 'bg-amber-400' : 'bg-blue-400'} rounded-full animate-bounce`} style={{ animationDelay: '150ms' }} />
+            <span className={`w-2 h-2 ${isFactChecking ? 'bg-amber-400' : 'bg-blue-400'} rounded-full animate-bounce`} style={{ animationDelay: '300ms' }} />
           </span>
         </h2>
 
@@ -94,11 +204,19 @@ export function ScriptOutput({
           </div>
         )}
 
+        {/* Fact-checking indicator */}
+        {isFactChecking && streamingText && (
+          <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+            <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+            <span className="text-amber-400 text-sm">Sonnet 4.5가 웹검색으로 대본을 검증하고 있습니다...</span>
+          </div>
+        )}
+
         {/* Streaming text */}
         {streamingText && (
           <div className="bg-gray-800 rounded-lg p-4 text-gray-200 whitespace-pre-wrap text-sm leading-relaxed max-h-96 overflow-y-auto">
             {streamingText}
-            <span className="inline-block w-2 h-4 bg-blue-400 animate-pulse ml-0.5" />
+            {!isFactChecking && <span className="inline-block w-2 h-4 bg-blue-400 animate-pulse ml-0.5" />}
           </div>
         )}
 
@@ -131,6 +249,8 @@ export function ScriptOutput({
   }
 
   // Output state - show final result
+  const fcResult = output.factCheckResult || factCheckResult;
+
   return (
     <div className="bg-gray-900 rounded-xl p-6 border border-gray-800 space-y-5">
       <div className="flex items-center justify-between">
@@ -141,6 +261,12 @@ export function ScriptOutput({
           {output.duration}초
         </span>
       </div>
+
+      {/* Fact-check badge */}
+      {fcResult && <FactCheckBadge result={fcResult} />}
+
+      {/* Fact-check details */}
+      {fcResult && <FactCheckDetails result={fcResult} />}
 
       {/* Pattern info */}
       <div className="flex flex-wrap gap-2">

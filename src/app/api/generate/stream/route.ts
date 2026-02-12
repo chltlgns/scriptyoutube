@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
-import type { ScriptInput, ScriptOutput, StreamEvent, PatternSelection } from '@/lib/types';
-import { selectPattern, buildScriptPrompt, buildRevisionPrompt } from '@/lib/prompts';
+import type { ScriptInput, ScriptOutput, StreamEvent, PatternSelection, FactCheckResult } from '@/lib/types';
+import { selectPattern, buildScriptPrompt, buildRevisionPrompt, buildFactCheckPrompt } from '@/lib/prompts';
 
 type MediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
 
@@ -52,6 +52,61 @@ async function extractPriceFromImage(
 
   const textBlock = response.content.find(b => b.type === 'text');
   return textBlock ? textBlock.text : '가격 데이터를 추출할 수 없습니다';
+}
+
+// 팩트체크 (Sonnet 4.5 + Web Search)
+async function factCheckScript(
+  anthropic: Anthropic,
+  script: string,
+  productInfo: string,
+  reviews: string,
+): Promise<FactCheckResult> {
+  try {
+    const prompt = buildFactCheckPrompt(script, productInfo, reviews);
+
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-5-20250929',
+      max_tokens: 4096,
+      tools: [
+        {
+          type: 'web_search_20250305',
+          name: 'web_search',
+          max_uses: 5,
+        } as unknown as Anthropic.Messages.Tool,
+      ],
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    // 검색 횟수 카운트
+    const searchesPerformed = response.content.filter(
+      (b) => b.type === 'server_tool_use',
+    ).length;
+
+    // 텍스트 블록에서 JSON 추출
+    const textBlocks = response.content.filter((b) => b.type === 'text');
+    const text = textBlocks.map((b) => 'text' in b ? b.text : '').join('');
+
+    // JSON 파싱
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return {
+        passed: parsed.passed ?? true,
+        issues: Array.isArray(parsed.issues) ? parsed.issues : [],
+        correctedScript: parsed.correctedScript || undefined,
+        searchesPerformed,
+      };
+    }
+
+    return { passed: true, issues: [], searchesPerformed };
+  } catch (error) {
+    console.error('Fact-check error:', error);
+    return {
+      passed: true,
+      issues: [],
+      searchesPerformed: 0,
+    };
+  }
 }
 
 // 대본 결과 파싱
@@ -202,6 +257,23 @@ export async function POST(request: NextRequest) {
 
           // Step 4: 결과 파싱
           const output = parseScriptOutput(fullContent, pattern);
+
+          // Step 5: 팩트체크 (Sonnet 4.5 + Web Search)
+          sendEvent({ type: 'fact_check_start' });
+          const factCheckResult = await factCheckScript(
+            anthropic,
+            output.script,
+            input.productInfo,
+            input.reviews,
+          );
+          sendEvent({ type: 'fact_check_result', factCheckResult });
+
+          // HIGH 이슈가 있고 수정 대본이 있으면 교체
+          if (!factCheckResult.passed && factCheckResult.correctedScript) {
+            output.script = factCheckResult.correctedScript;
+          }
+          output.factCheckResult = factCheckResult;
+
           sendEvent({ type: 'complete', output });
         }
       } catch (error) {

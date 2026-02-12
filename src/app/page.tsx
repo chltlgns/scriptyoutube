@@ -39,6 +39,13 @@ export default function Home() {
             case 'chunk':
               if (event.content) store.appendStreamingText(event.content);
               break;
+            case 'fact_check_start':
+              store.setIsFactChecking(true);
+              break;
+            case 'fact_check_result':
+              store.setIsFactChecking(false);
+              if (event.factCheckResult) store.setFactCheckResult(event.factCheckResult);
+              break;
             case 'complete':
               if (event.output) {
                 store.setOutput(event.output);
@@ -220,6 +227,8 @@ export default function Home() {
             selectedPattern={store.selectedPattern}
             priceData={store.priceData}
             isGenerating={store.isGenerating}
+            isFactChecking={store.isFactChecking}
+            factCheckResult={store.factCheckResult}
             onRevision={handleRevision}
           />
         </div>
