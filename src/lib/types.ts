@@ -1,9 +1,12 @@
 // ===== 패턴 타입 =====
 
 export type HookType =
+  | 'provocative'        // 부정형/도발형 (weight: 12) — 4채널 공통 최고 안정 성과
+  | 'surprise'           // 놀라움/파격형 (weight: 11) — kilshop01 764K
+  | 'negation'           // 부정선언/반전형 (weight: 11) — 테크처방전 632K
   | 'problem_empathy'    // 문제공감형 (weight: 10)
   | 'rhetorical'         // 반문형 (weight: 9)
-  | 'fomo_urgency'       // FOMO/긴급성형 (weight: 8)
+  | 'fomo_urgency'       // FOMO/긴급성형 (weight: 7) — 4채널 공통 중하위 재평가
   | 'price_shock'        // 가격충격형 (weight: 7)
   | 'question'           // 질문형 (weight: 7)
   | 'command'            // 명령형 (weight: 6)
@@ -19,7 +22,8 @@ export type BodyType =
 export type CtaType =
   | 'urgency'            // 긴급성 CTA (weight: 10)
   | 'price_anchor'       // 가격앵커 CTA (weight: 8)
-  | 'soft';              // 부드러운 CTA (weight: 7)
+  | 'soft'               // 부드러운 CTA (weight: 7)
+  | 'minimal';           // 최소CTA (weight: 6) — 영상 내 CTA 없이 설명란 집중 (kilshop01 모델)
 
 export interface PatternSelection {
   hook: HookType;
@@ -33,6 +37,18 @@ export interface PatternHistory {
   recentCtas: CtaType[];
   totalGenerated: number;
 }
+
+// ===== 대본 길이/제목 상수 =====
+
+export const SCRIPT_DURATION = {
+  affiliate: { min: 15, optimal: 17, max: 20 },      // 제휴 컨텐츠
+  nonAffiliate: { min: 25, optimal: 30, max: 35 },    // 비제휴 의견 컨텐츠
+} as const;
+
+export const TITLE_LENGTH = {
+  optimal: { min: 17, max: 19 },  // kilshop01 TOP5 데이터
+  max: 30,                         // 모바일 잘림 방지
+} as const;
 
 // ===== 팩트체크 타입 =====
 

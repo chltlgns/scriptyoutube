@@ -3,14 +3,17 @@ import type { HookType, BodyType, CtaType, PatternSelection } from './types';
 // ===== 패턴 가중치 (성과 데이터 기반) =====
 
 const HOOK_WEIGHTS: Record<HookType, number> = {
-  problem_empathy: 10,  // 문제공감형 - avg 22,464 views (TOP 성과)
-  rhetorical: 9,        // 반문형 - avg 14,080
-  fomo_urgency: 9,      // FOMO/긴급성 - avg 13,805
-  price_shock: 7,       // 가격충격형 - avg 12,692
-  question: 6,          // 질문형 - avg 9,957
-  command: 2,           // 명령형 - "~사세요" BOTTOM 10의 70% 차지, 차별화 실패
-  comparison: 3,        // 비교프레임형 - avg 9,688, 낮은 성과
-  value_declare: 2,     // 가성비선언형 - avg 6,431, 최저 성과
+  provocative: 12,      // 부정형/도발 — 4채널 공통 최고. "왜 안 돼요?", "이래도 살 건가요?"
+  surprise: 11,         // 놀라움/파격 — kilshop01 764K. "테슬라에서 폰을 만듭니다!"
+  negation: 11,         // 부정선언/반전 — 테크처방전 632K. "갤럭시폴드7 이래도 안사나요?"
+  problem_empathy: 10,  // 문제공감형 (유지)
+  rhetorical: 9,        // 반문형 (유지)
+  fomo_urgency: 7,      // FOMO — 4채널 공통 중하위로 하향
+  price_shock: 7,       // 가격충격형 (유지)
+  question: 6,          // 질문형 (유지)
+  comparison: 3,        // 비교프레임형 (유지)
+  command: 1,           // 명령형 — BOTTOM10의 70%, 거의 사용 금지 수준
+  value_declare: 1,     // 가성비선언 — 최저 성과, 거의 사용 금지 수준
 };
 
 const BODY_WEIGHTS: Record<BodyType, number> = {
@@ -21,30 +24,37 @@ const BODY_WEIGHTS: Record<BodyType, number> = {
 };
 
 const CTA_WEIGHTS: Record<CtaType, number> = {
-  urgency: 10,          // 긴급성 CTA - avg 12,806
-  price_anchor: 8,      // 가격앵커 CTA
-  soft: 7,              // 부드러운 CTA - avg 9,138
+  minimal: 10,          // 최소CTA — kilshop01 모델. 설명란 집중, 영상 내 CTA 없음
+  urgency: 8,           // 긴급성 — 기존 10에서 하향
+  price_anchor: 7,      // 가격앵커 (유지)
+  soft: 7,              // 부드러운 CTA (유지)
 };
 
 // ===== 검증된 고성과 조합 (Golden Combos) =====
 // 보고서 데이터에서 검증된 최적 조합
 const GOLDEN_COMBOS: Array<{ hook: HookType; body: BodyType; cta: CtaType; avgViews: number; weight: number }> = [
-  // Template A: 문제공감 + 체험 + 긴급CTA (보고서2 최고 성과)
-  { hook: 'problem_empathy', body: 'experience', cta: 'urgency', avgViews: 22464, weight: 18 },
-  // Template A 변형: 문제공감 + 스펙체험 혼합
-  { hook: 'problem_empathy', body: 'spec_experience', cta: 'urgency', avgViews: 18000, weight: 16 },
-  // 반문 + 체험 (반문형 avg 14,080 + 체험 avg 14,818)
-  { hook: 'rhetorical', body: 'experience', cta: 'urgency', avgViews: 14080, weight: 14 },
-  // Template B: FOMO + 스펙체험 + 긴급CTA
-  { hook: 'fomo_urgency', body: 'spec_experience', cta: 'urgency', avgViews: 13805, weight: 13 },
-  // FOMO + 체험
-  { hook: 'fomo_urgency', body: 'experience', cta: 'urgency', avgViews: 12847, weight: 13 },
+  // === 4채널 교차 검증 콤보 (최고 성과) ===
+  // kilshop01 764K — 놀라움/파격 + 체험 + 최소CTA
+  { hook: 'surprise', body: 'experience', cta: 'minimal', avgViews: 764375, weight: 22 },
+  // 테크처방전 656K — 부정형/도발 + 체험 + 최소CTA
+  { hook: 'provocative', body: 'experience', cta: 'minimal', avgViews: 656839, weight: 21 },
+  // 테크처방전 632K — 부정선언/반전 + 체험 + 최소CTA
+  { hook: 'negation', body: 'experience', cta: 'minimal', avgViews: 632096, weight: 20 },
+  // kilshop01 + 테크처방전 교차 — 부정형/도발 + 스펙체험 + 긴급CTA
+  { hook: 'provocative', body: 'spec_experience', cta: 'urgency', avgViews: 494617, weight: 19 },
+  // === 기존 검증 콤보 (가중치 재조정) ===
+  // 문제공감 + 체험 + 긴급CTA
+  { hook: 'problem_empathy', body: 'experience', cta: 'urgency', avgViews: 22464, weight: 16 },
+  // 문제공감 + 스펙체험 혼합
+  { hook: 'problem_empathy', body: 'spec_experience', cta: 'urgency', avgViews: 18000, weight: 14 },
+  // 반문 + 체험
+  { hook: 'rhetorical', body: 'experience', cta: 'urgency', avgViews: 14080, weight: 13 },
   // 가격충격 + 스펙체험 + 가격앵커
   { hook: 'price_shock', body: 'spec_experience', cta: 'price_anchor', avgViews: 12692, weight: 12 },
-  // 질문 + 체험 + 부드러운CTA (보고서1 Template B)
-  { hook: 'question', body: 'experience', cta: 'soft', avgViews: 10000, weight: 11 },
-  // 질문 + 스펙체험 + 긴급CTA
-  { hook: 'question', body: 'spec_experience', cta: 'urgency', avgViews: 9957, weight: 11 },
+  // FOMO + 스펙체험 + 긴급CTA
+  { hook: 'fomo_urgency', body: 'spec_experience', cta: 'urgency', avgViews: 13805, weight: 11 },
+  // 질문 + 체험 + 부드러운CTA
+  { hook: 'question', body: 'experience', cta: 'soft', avgViews: 10000, weight: 10 },
 ];
 
 // ===== 배제할 저성과 조합 =====
@@ -65,6 +75,12 @@ const BANNED_HOOK_BODY: Array<{ hook: HookType; body: BodyType }> = [
 // ===== 패턴별 프롬프트 지시 =====
 
 const HOOK_INSTRUCTIONS: Record<HookType, string> = {
+  provocative:
+    "시청자의 기존 인식에 도전. 예: '이래도 살 건가요?', '왜 안 돼요?', '말고 이거 사세요!', '살 이유가 없어요!'. 보고서 데이터: 4채널 공통 최고 안정 패턴",
+  surprise:
+    "첫 3초에 충격적 팩트 전달. 예: '테슬라에서 폰을 만듭니다!', '모토로라가 2026년에 돌아왔다!'. 보고서 데이터: kilshop01 최고 764K",
+  negation:
+    "부정 선언으로 반전. 예: '갤럭시폴드7 이래도 안 사려고요?', '아이폰 프로 살 이유가 없어요!'. 보고서 데이터: 테크처방전 632K",
   problem_empathy:
     "첫 문장에서 시청자의 구체적인 고민/불편함을 언급. 예: '~불편하죠?', '~포기 못하잖아요', '~어려워서 못 쓰겠어'",
   rhetorical:
@@ -95,6 +111,8 @@ const BODY_INSTRUCTIONS: Record<BodyType, string> = {
 };
 
 const CTA_INSTRUCTIONS: Record<CtaType, string> = {
+  minimal:
+    "영상 내 CTA를 최소화하고 콘텐츠 몰입에 집중. 마지막 문장을 자연스러운 결론으로 마무리. 설명란과 프로필에서 전환. 예: '이 정도면 답 나왔죠?', '결론은 여러분 판단에 맡길게요'. 보고서 데이터: kilshop01 60%가 이 방식, 평균 44만 조회",
   urgency:
     "긴급성 포함. '고민하면 품절입니다', '놓치지 마세요', '지금이 기회'",
   price_anchor:
@@ -166,9 +184,21 @@ export function selectPattern(recentPatterns: PatternSelection[]): PatternSelect
   const recentBodies = last5.map((p) => p.body);
   const recentCtas = last5.map((p) => p.cta);
 
+  // 훅 다양성 강제: 최근 5개 중 같은 훅이 2개 이상이면 해당 훅 제외
+  // 근거: 돈버는쇼핑 87% 동일 패턴 → 최저 성과 / kilshop01 6가지 균등 → 최고 성과
+  const hookCounts = new Map<HookType, number>();
+  for (const h of recentHooks) {
+    hookCounts.set(h, (hookCounts.get(h) ?? 0) + 1);
+  }
+  const overusedHooks: HookType[] = [];
+  for (const [hook, count] of hookCounts) {
+    if (count >= 2) overusedHooks.push(hook);
+  }
+  const hookExcludes = [...new Set([...recentHooks, ...overusedHooks])];
+
   // 최대 10회 시도로 밴 조합 회피
   for (let attempt = 0; attempt < 10; attempt++) {
-    const hook = weightedRandomSelect(HOOK_WEIGHTS, recentHooks);
+    const hook = weightedRandomSelect(HOOK_WEIGHTS, hookExcludes);
     const body = weightedRandomSelect(BODY_WEIGHTS, recentBodies);
     const cta = weightedRandomSelect(CTA_WEIGHTS, recentCtas);
 
@@ -179,7 +209,7 @@ export function selectPattern(recentPatterns: PatternSelection[]): PatternSelect
   }
 
   // 10회 실패 시 가장 안전한 조합 반환
-  return { hook: 'problem_empathy', body: 'experience', cta: 'urgency' };
+  return { hook: 'provocative', body: 'experience', cta: 'minimal' };
 }
 
 // ===== 통합 시스템 프롬프트 =====
@@ -208,33 +238,34 @@ export function buildScriptPrompt(pattern: PatternSelection, priceData: string):
 - 본문 패턴: ${pattern.body}
 - CTA 패턴: ${pattern.cta}
 
-## 대본 구조 (20-23초) - 반드시 이 타임라인을 지켜서 작성
+## 대본 구조 (17-20초) - 반드시 이 타임라인을 지켜서 작성
 
 ### [0-3초] 훅 — 가장 중요! 3초 안에 시청자를 잡아야 합니다
 ${hookInstruction}
 
 절대 규칙:
 - 첫 문장이 시청자의 감정을 강하게 자극해야 합니다
-- "~사세요", "~추천합니다" 같은 약한 명령형으로 시작하지 마세요 (보고서 데이터: 이 패턴은 BOTTOM 10의 70%를 차지, 평균 7,246회에 불과)
+- "~사세요", "~추천합니다" 같은 약한 명령형으로 시작하지 마세요 (보고서 데이터: 이 패턴은 BOTTOM 10의 70%를 차지, 평균 5,477회에 불과)
 - 시청자가 "이건 나한테 해당되는 이야기다"라고 느끼게 만드세요
 - 구체적인 상황/감정/수치로 시작하세요
 
 훅 강도 기준 (반드시 따르세요):
-- 최고: "맥북 아이패드 불편하죠?" (22,464회) — 시청자 고민 직접 공략
-- 좋음: "지금 게이밍 노트북이 가장 저렴합니다" (13,805회) — 긴급성
-- 나쁨: "~사세요", "~추천합니다" (7,246회) — 시청자 관심 끌기 실패
+- 최고: "이래도 살 건가요?" (494,617회) — 시청자 인식에 도전, 도발형
+- 최고: "테슬라에서 폰을 만듭니다!" (764,375회) — 충격적 팩트, 놀라움형
+- 좋음: "맥북 아이패드 불편하죠?" (22,464회) — 시청자 고민 직접 공략
+- 나쁨: "~사세요", "~추천합니다" (5,477회) — 시청자 관심 끌기 실패
 
 ### [3-5초] 솔루션 선언 + 핵심 가치 1개
 제품명과 가장 강력한 셀링 포인트 1개를 짧고 임팩트있게 제시합니다.
 예: "정답은 에이수스 A14, 1.46kg인데 RTX 5050 조합이라 미쳤어요"
 
-### [5-10초] 본문
+### [5-9초] 본문
 ${bodyInstruction}
 리뷰에서 나만의 논점을 도출하세요. 단순 인용이 아닌, 리뷰 키워드를 기반으로 자기만의 의견을 형성하세요.
 스펙을 나열하지 말고, 사용 체감으로 전환하세요.
 예: "직접 써봤는데 로스트아크 풀옵으로 돌리는데 팬 소음이 거의 없어요"
 
-### [10-15초] 가격 추적 구간 (필수! — 가격 데이터를 정확히 반영해야 합니다)
+### [9-13초] 가격 추적 구간 (필수! — 가격 데이터를 정확히 반영해야 합니다)
 "내가 만든 사이트로 가격 추적했더니 {가격 추이}" 형태로 가격 데이터를 자연스럽게 녹여내세요.
 
 절대 규칙: 제공된 가격 추적 데이터(현재가, 최저가, 최고가, 추이)를 반드시 정확히 반영하세요. 데이터와 다른 말을 하면 안 됩니다!
@@ -268,11 +299,11 @@ ${bodyInstruction}
 - "제 사이트에서 확인해보니 몇 주째 가격이 같아요. 급등이나 급락 징조도 없어서 편하게 사셔도 돼요"
 - "직접 추적해봤는데 가격이 안정권이에요. 세일을 기다릴 필요 없이 지금이 적정가입니다"
 
-### [15-19초] 감정적 확인 + 단점 솔직 언급 → 반전
+### [13-16초] 단점 솔직 언급 → 반전
 솔직한 단점 1개를 언급한 뒤, 그것이 오히려 장점이 되는 반전을 넣으세요.
 예: "솔직히 512GB 저장공간이 좀 아쉽긴 한데, SSD 슬롯이 2개라 1TB 추가하면 오히려 데스크탑보다 확장성이 좋아요"
 
-### [19-23초] 타겟 명시 + CTA
+### [16-19초] 타겟 명시 + CTA
 ${ctaInstruction}
 타겟층(대학생/직장인/게이머 등)을 명시하세요.
 예: "이직 준비하는 직장인이나 게임하는 대학생들 한번 확인해보세요"
@@ -292,35 +323,50 @@ ${priceSection}
 
 ## 제목 생성 규칙 (성과순으로 우선 적용)
 
-제목 후보 3개를 아래 4가지 공식에서 생성. 성과가 높은 C, D 공식을 우선 사용하세요.
+제목 후보 3개를 아래 6가지 공식에서 생성. 성과가 높은 E, F 공식을 우선 사용하세요.
 3개 제목은 반드시 서로 다른 공식을 사용해야 합니다.
 
-공식 C (확신명령형, 평균 17,781회 — 최고 성과):
+공식 E (부정형/도발형, 4채널 최고 성과 — 최우선 사용):
+형식: "[부정 키워드] + [제품명] + [도발적 질문/선언]"
+예: "아이폰17 디자인 이래도 산다고요?" (1,016,917회)
+예: "아이폰 17 프로 살 이유가 없어요!" (556,046회)
+효과: 시청자의 인식에 도전하여 반사적 클릭 유도. 4채널 공통 최고 안정 패턴
+
+공식 F (극찬/파격형, kilshop01 132만 — 최우선 사용):
+형식: "[제품명] + [파격적 선언/발견]"
+예: "테슬라폰 사면 통신요금 평생 0원!" (2,521,190회)
+예: "iOS26 업데이트 진짜 혁명입니다!" (495,102회)
+효과: 충격적 팩트로 즉각 클릭 유도. kilshop01 단일 채널 최고 성과
+
+공식 C (확신명령형, 평균 17,781회):
 형식: "[연도] + [카테고리]는 [제품명]으로 하세요!"
 예: "2026년 테블릿PC는 서피스프로 11로 하세요!" (21,973회)
-예: "맥북말고 엘지그램프로 16인치 사세요!" (7,310회)
 효과: 선택 과부하를 해결, 결정 피로를 대신 처리
 
 공식 D (타겟+검색어형, 평균 15,026회):
 형식: "[검색 키워드] + [제품명] + [타겟층]에게 딱 좋은 [카테고리]!"
-예: "게이밍노트북추천 HP 빅터스 15 대학생 직장인에게 딱 좋은 노트북!" (22,954회)
-예: "게이밍노트북 추천 2026 에이수스 tuf A14!가성비 게임+업무용!" (17,097회)
+예: "게이밍노트북추천 HP 빅터스 15 대학생 직장인에게 딱!" (22,954회)
 효과: SEO(검색 키워드) + 타겟팅 + 감정 3박자 동시 충족
 
 공식 A (극찬비유형, 평균 13,386회):
 형식: "[이건/이게] + [극찬 비유(괴물/끝판왕/미쳤다)] + [제품명]"
 예: "이건 게이밍노트북이 아니라 괴물입니다 제피러스 G16" (12,692회)
-예: "UMPC 끝판왕! 이건 미쳤다! ROG Xbox Ally X" (14,080회)
 효과: A가 아니라 B 반전 구조가 기대를 깨뜨리고 호기심 자극
 
 공식 B (FOMO+제품명, 평균 12,847회):
 형식: "[긴급성 키워드(램가격/지금/사전예약)] + [제품명] + [행동 촉구]"
-예: "에이수스 TUF F16 램가격 오르기전에 지금 노트북 구매할때!" (14,450회)
+예: "에이수스 TUF F16 램가격 오르기전에 지금 구매할때!" (14,450회)
 효과: 외부 요인(가격 변동)으로 구매를 정당화, "지금 봐야 해" 심리 유발
 
+제목 길이 규칙 (4채널 데이터 기반):
+- **최적 길이: 17-19자** (kilshop01 TOP5 중 4개가 이 구간, 평균 617,770회)
+- **최대 25자** (모바일 잘림 방지)
+- 핵심 메시지가 앞 **15자**에 위치해야 함
+- 30자 이상은 성과 급락 (절대 금지)
+
 제목 체크리스트 (모든 제목이 충족해야 함):
-- 핵심 메시지가 앞 20자에 위치
-- 30자 이하로 압축 (모바일에서 잘리지 않도록)
+- 17-19자 최적 길이 준수 (최대 25자)
+- 핵심 메시지가 앞 15자에 위치
 - 극단적 감정 표현 포함 ("미쳤다", "끝판왕", "괴물" 수준)
 - "왜 봐야 하는지"가 제목에서 즉시 파악 가능
 - 제품의 차별화 포인트 1개 이상 포함 (OLED/1.2kg/500만원 등)
@@ -328,8 +374,8 @@ ${priceSection}
 - 검색 키워드를 제목 앞부분에 배치 (검색 유입 증가)
 
 제목 DO/DON'T:
-DO: "이건 괴물입니다" (비유), "램가격 미쳐버렸다" (감정+긴급), "대학생 직장인에게 딱" (타겟), "2026년 ~로 하세요" (명령), 제품 차별점 포함
-DON'T: "꼭 보세요" (반복 - 3회 사용 모두 BOTTOM, 평균 4,134회), "사기전에 한번 보세요" (식상), "노트북 추천합니다" (모호), "~가 출시됐습니다" (뉴스형), 브랜드명만 나열, 45자 이상 장문
+DO: "이래도 산다고요?" (도발), "평생 0원!" (파격), "이건 괴물입니다" (비유), "대학생에게 딱" (타겟), 제품 차별점 포함
+DON'T: "꼭 보세요" (반복 - 3회 사용 모두 BOTTOM, 평균 4,134회), "사기전에 한번 보세요" (식상), "노트북 추천합니다" (모호), "~가 출시됐습니다" (뉴스형), 브랜드명만 나열, 26자 이상 장문
 
 ## 금지 사항 (보고서 데이터 기반 - 위반 시 BOTTOM Tier 확정)
 - "사기전에 꼭 보세요" 반복 공식 금지 (3회 사용 모두 BOTTOM Tier, 평균 4,134회)
@@ -339,8 +385,8 @@ DON'T: "꼭 보세요" (반복 - 3회 사용 모두 BOTTOM, 평균 4,134회), "�
 - "노트북 추천합니다" 같은 모호한 제목 금지
 - "~가 출시됐습니다" 뉴스형 제목 금지
 - 제목 오타 금지 (최하위 2,527회 영상에서 오타 2개 발견)
-- 41자 이상 제목 금지 (41자 이상 평균 9,001회로 하락)
-- 25초 초과 대본 금지
+- 26자 이상 제목 금지 (17-19자 최적, 최대 25자)
+- 20초 초과 대본 금지 (17-20초 최적)
 - 스펙만 나열하는 본문 금지 (반드시 1개 이상 체험형 전환)
 - 같은 훅 패턴 3회 연속 사용 금지 (반복 시 알고리즘 차별화 효과 소멸)
 - 타 제품과 비교 시 근거 없는 우열 주장 금지 (예: "제피러스보다 조용하다" → 리뷰 데이터에 근거가 있을 때만 사용)
@@ -356,10 +402,10 @@ DON'T: "꼭 보세요" (반복 - 3회 사용 모두 BOTTOM, 평균 4,134회), "�
 대본:
 [0-3초] (훅 내용)
 [3-5초] (솔루션 선언)
-[5-10초] (본문)
-[10-15초] (가격 추적)
-[15-19초] (단점+반전)
-[19-23초] (타겟+CTA)
+[5-9초] (본문)
+[9-13초] (가격 추적)
+[13-16초] (단점+반전)
+[16-19초] (타겟+CTA)
 
 타겟: [타겟 설명]
 
@@ -481,15 +527,15 @@ export function buildRevisionPrompt(
 ## 수정 규칙
 - 사용자의 피드백을 정확히 반영하여 대본을 수정하세요.
 - 기존 대본의 전체 구조와 톤은 유지하되, 피드백 부분만 수정하세요.
-- 20-23초 분량을 유지하세요.
+- 17-20초 분량을 유지하세요.
 - 가격 추적 사이트 언급, 리뷰 기반 논점, 단점+반전 등 필수 요소를 유지하세요.
 
 ## 금지 사항
 - "사기전에 꼭 보세요" 반복 공식 금지
 - "왼쪽 상품 보기" CTA 금지
 - 제목 오타 금지
-- 41자 이상 제목 금지
-- 25초 초과 대본 금지
+- 26자 이상 제목 금지
+- 20초 초과 대본 금지
 
 ## 출력 형식 (아래 형식을 정확히 따르세요. ##이나 마크다운 헤더를 사용하지 마세요.)
 
