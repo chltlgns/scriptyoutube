@@ -1,5 +1,8 @@
 import { create } from 'zustand';
-import type { ScriptInput, ScriptOutput, PatternSelection, PatternHistory, FactCheckResult } from './types';
+import type {
+  ScriptInput, ScriptOutput, PatternSelection, PatternHistory, FactCheckResult,
+  WordCheckResult, DirectorDecision,
+} from './types';
 
 interface ScriptState {
   // Input
@@ -19,6 +22,13 @@ interface ScriptState {
   // Pattern history (for rotation - persisted in localStorage)
   patternHistory: PatternHistory;
 
+  // V2 additions
+  currentPhase: 'idle' | 'price' | 'team_analysis' | 'script_generation' | 'word_check' | 'fact_check';
+  teamAnalysisText: string;
+  detectedProductType: string | null;
+  wordCheckResult: WordCheckResult | null;
+  directorDecision: DirectorDecision | null;
+
   // Actions
   setInput: (input: ScriptInput) => void;
   setIsGenerating: (v: boolean) => void;
@@ -30,6 +40,13 @@ interface ScriptState {
   setPriceData: (data: string) => void;
   setFactCheckResult: (result: FactCheckResult) => void;
   addToHistory: (pattern: PatternSelection) => void;
+  // V2 actions
+  setCurrentPhase: (phase: ScriptState['currentPhase']) => void;
+  appendTeamAnalysisText: (chunk: string) => void;
+  clearTeamAnalysisText: () => void;
+  setDetectedProductType: (productType: string) => void;
+  setWordCheckResult: (result: WordCheckResult) => void;
+  setDirectorDecision: (decision: DirectorDecision) => void;
   reset: () => void;
 }
 
@@ -60,6 +77,12 @@ export const useScriptStore = create<ScriptState>((set, get) => ({
   priceData: null,
   factCheckResult: null,
   patternHistory: loadHistory(),
+  // V2 state
+  currentPhase: 'idle',
+  teamAnalysisText: '',
+  detectedProductType: null,
+  wordCheckResult: null,
+  directorDecision: null,
 
   setInput: (input) => set({ input }),
   setIsGenerating: (v) => set({ isGenerating: v }),
@@ -81,6 +104,13 @@ export const useScriptStore = create<ScriptState>((set, get) => ({
     saveHistory(updated);
     set({ patternHistory: updated });
   },
+  // V2 actions
+  setCurrentPhase: (phase) => set({ currentPhase: phase }),
+  appendTeamAnalysisText: (chunk) => set((s) => ({ teamAnalysisText: s.teamAnalysisText + chunk })),
+  clearTeamAnalysisText: () => set({ teamAnalysisText: '' }),
+  setDetectedProductType: (productType) => set({ detectedProductType: productType }),
+  setWordCheckResult: (result) => set({ wordCheckResult: result }),
+  setDirectorDecision: (decision) => set({ directorDecision: decision }),
   reset: () => set({
     streamingText: '',
     output: null,
@@ -88,5 +118,11 @@ export const useScriptStore = create<ScriptState>((set, get) => ({
     priceData: null,
     factCheckResult: null,
     isFactChecking: false,
+    // V2 reset
+    currentPhase: 'idle',
+    teamAnalysisText: '',
+    detectedProductType: null,
+    wordCheckResult: null,
+    directorDecision: null,
   }),
 }));

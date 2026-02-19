@@ -32,15 +32,32 @@ export default function Home() {
           switch (event.type) {
             case 'price_extracted':
               if (event.priceData) store.setPriceData(event.priceData);
+              store.setCurrentPhase('price');
+              break;
+            case 'team_analysis_start':
+              store.setCurrentPhase('team_analysis');
+              break;
+            case 'team_analysis_chunk':
+              if (event.content) store.appendTeamAnalysisText(event.content);
+              break;
+            case 'team_analysis_complete':
+              if (event.directorDecision) store.setDirectorDecision(event.directorDecision);
+              if (event.directorDecision?.productType) store.setDetectedProductType(event.directorDecision.productType);
               break;
             case 'pattern_selected':
               if (event.pattern) store.setSelectedPattern(event.pattern);
+              store.setCurrentPhase('script_generation');
               break;
             case 'chunk':
               if (event.content) store.appendStreamingText(event.content);
               break;
+            case 'word_check_result':
+              if (event.wordCheckResult) store.setWordCheckResult(event.wordCheckResult);
+              store.setCurrentPhase('word_check');
+              break;
             case 'fact_check_start':
               store.setIsFactChecking(true);
+              store.setCurrentPhase('fact_check');
               break;
             case 'fact_check_result':
               store.setIsFactChecking(false);
@@ -51,10 +68,12 @@ export default function Home() {
                 store.setOutput(event.output);
                 store.addToHistory(event.output.pattern);
               }
+              store.setCurrentPhase('idle');
               break;
             case 'error':
               console.error('Error:', event.error);
               alert(`대본 생성 오류: ${event.error}`);
+              store.setCurrentPhase('idle');
               break;
           }
         } catch { /* ignore parse errors */ }
@@ -63,14 +82,11 @@ export default function Home() {
   };
 
   const handleCrawl = async (url: string) => {
-    // 1. validating
     setCrawlState({ step: 'validating', message: 'URL 검증 중...', progress: 10 });
     setCrawledData(null);
 
-    // 2. start crawling with progress animation
     setCrawlState({ step: 'crawling', message: '쿠팡에서 데이터 수집 중... (최대 3분)', progress: 15 });
 
-    // 시간 기반 프로그레스 (15% → 80%, 180초에 걸쳐)
     let currentProgress = 15;
     progressIntervalRef.current = setInterval(() => {
       currentProgress = Math.min(currentProgress + 0.5, 80);
@@ -84,7 +100,6 @@ export default function Home() {
         body: JSON.stringify({ url }),
       });
 
-      // 프로그레스 타이머 정리
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current);
         progressIntervalRef.current = null;
@@ -104,15 +119,12 @@ export default function Home() {
         return;
       }
 
-      // 3. filling
       setCrawlState({ step: 'filling', message: '데이터 채우는 중...', progress: 90 });
       const crawled = { productInfo: data.productInfo, reviews: data.reviews };
       setCrawledData(crawled);
 
-      // 4. done
       setCrawlState({ step: 'done', message: `수집 완료! (${data.productName})`, progress: 100 });
 
-      // 3초 후 크롤 상태 리셋 (사용자가 데이터 확인 후 수동으로 대본 생성)
       setTimeout(() => {
         setCrawlState({ step: 'idle', message: '', progress: 0 });
       }, 3000);
@@ -168,6 +180,7 @@ export default function Home() {
     } finally {
       store.setIsGenerating(false);
       store.clearStreamingText();
+      store.clearTeamAnalysisText();
     }
   };
 
@@ -204,10 +217,10 @@ export default function Home() {
       <header className="border-b border-gray-800 bg-gray-900/80 backdrop-blur-sm sticky top-0 z-10">
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <h1 className="text-2xl font-bold text-white">
-            쇼츠 대본 생성기
+            쇼츠 대본 생성기 <span className="text-sm font-normal text-gray-500">v2</span>
           </h1>
           <div className="text-sm text-gray-400">
-            패턴 자동 로테이션 &middot; {store.patternHistory.totalGenerated}개 생성됨
+            4+1 팀 분석 &middot; {store.patternHistory.totalGenerated}개 생성됨
           </div>
         </div>
       </header>
@@ -224,11 +237,14 @@ export default function Home() {
           <ScriptOutput
             output={store.output}
             streamingText={store.streamingText}
+            teamAnalysisText={store.teamAnalysisText}
             selectedPattern={store.selectedPattern}
             priceData={store.priceData}
             isGenerating={store.isGenerating}
             isFactChecking={store.isFactChecking}
             factCheckResult={store.factCheckResult}
+            wordCheckResult={store.wordCheckResult}
+            currentPhase={store.currentPhase}
             onRevision={handleRevision}
           />
         </div>
@@ -236,7 +252,7 @@ export default function Home() {
 
       <footer className="border-t border-gray-800 mt-8">
         <div className="max-w-6xl mx-auto px-4 py-4 text-center text-gray-600 text-sm">
-          패턴 기반 대본 생성 &middot; 20-23초 최적화
+          4+1 팀 분석 기반 대본 생성 &middot; 3채널 128개 영상 데이터
         </div>
       </footer>
     </div>

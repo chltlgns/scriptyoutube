@@ -83,6 +83,55 @@ export interface ScriptOutput {
   duration: number;
   targetAudience: string;
   factCheckResult?: FactCheckResult;
+  patternV2?: PatternSelectionV2;
+  wordCheckResult?: WordCheckResult;
+  teamAnalysis?: string;
+}
+
+// ===== V2 패턴 타입 (3채널 128개 영상 기반) =====
+
+export type HookTypeV2 =
+  | 'benefit_shock'      // 혜택 충격형 (weight: 15) — 2,521,190뷰
+  | 'debate_provoke'     // 논쟁 반문형 (weight: 13) — 1,016,917뷰
+  | 'sensory_nostalgia'  // 감각/향수형 (weight: 12) — 927,095뷰
+  | 'comparison_alt'     // 비교 대체형 (weight: 10) — 566,197뷰
+  | 'contrast'           // 대조법 (weight: 9) — 78,753뷰
+  | 'problem_empathy'    // 문제 공감형 (weight: 8) — 22,464뷰
+  | 'fomo_urgency'       // FOMO 긴급형 (weight: 6) — 14,450뷰
+  | 'price_shock';       // 가격 충격형 (weight: 5) — 12,692뷰
+
+export type CtaTypeV2 =
+  | 'none_debate'        // CTA 없음/논쟁 마무리 (weight: 12) — 1,500,000+뷰
+  | 'soft'               // 부드러운 CTA (weight: 8) — 200K~570K뷰
+  | 'urgency';           // 긴급 CTA (weight: 5) — 12,806뷰
+
+export type TemplateType = 'A' | 'B' | 'C';
+
+export interface PatternSelectionV2 {
+  hook: HookTypeV2;
+  body: BodyType;
+  cta: CtaTypeV2;
+  template: TemplateType;
+}
+
+export interface DirectorDecision {
+  template: TemplateType;
+  hook: HookTypeV2;
+  body: BodyType;
+  cta: CtaTypeV2;
+  forbiddenWords: string[];
+  keywords: string[];
+  priceNarrative: string;
+  finalHook: string;
+  productType: string;
+  wordPalette: string[];
+}
+
+export interface WordCheckResult {
+  passed: boolean;
+  forbiddenWordsFound: string[];
+  missingRequiredPhrases: string[];
+  repeatedWords: Array<{ word: string; count: number }>;
 }
 
 // ===== 스트리밍 이벤트 =====
@@ -90,8 +139,12 @@ export interface ScriptOutput {
 export type StreamEventType =
   | 'start'
   | 'price_extracted'
+  | 'team_analysis_start'
+  | 'team_analysis_chunk'
+  | 'team_analysis_complete'
   | 'pattern_selected'
   | 'chunk'
+  | 'word_check_result'
   | 'fact_check_start'
   | 'fact_check_result'
   | 'complete'
@@ -102,9 +155,13 @@ export interface StreamEvent {
   content?: string;
   priceData?: string;
   pattern?: PatternSelection;
+  patternV2?: PatternSelectionV2;
   output?: ScriptOutput;
   factCheckResult?: FactCheckResult;
+  wordCheckResult?: WordCheckResult;
+  directorDecision?: DirectorDecision;
   error?: string;
+  phase?: string;
 }
 
 // ===== 크롤링 =====
@@ -138,4 +195,10 @@ export interface ScriptStore {
   priceData: string | null;
   factCheckResult: FactCheckResult | null;
   patternHistory: PatternHistory;
+  // V2 additions
+  currentPhase: 'idle' | 'price' | 'team_analysis' | 'script_generation' | 'word_check' | 'fact_check';
+  teamAnalysisText: string;
+  detectedProductType: string | null;
+  wordCheckResult: WordCheckResult | null;
+  directorDecision: DirectorDecision | null;
 }

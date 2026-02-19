@@ -1,7 +1,9 @@
 import { NextRequest } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
-import type { ScriptInput, ScriptOutput, StreamEvent, PatternSelection, FactCheckResult } from '@/lib/types';
-import { selectPattern, buildScriptPrompt, buildRevisionPrompt, buildFactCheckPrompt } from '@/lib/prompts';
+import type { ScriptInput, ScriptOutput, StreamEvent, PatternSelection, FactCheckResult, DirectorDecision, PatternSelectionV2 } from '@/lib/types';
+import { buildPhase1Prompt, buildPhase2Prompt, parseDirectorDecision } from '@/lib/agents';
+import { buildFactCheckPrompt, buildRevisionPrompt } from '@/lib/prompts';
+import { validateScript, buildWordCorrectionPrompt } from '@/lib/wordControl';
 
 type MediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
 
@@ -77,16 +79,13 @@ async function factCheckScript(
       messages: [{ role: 'user', content: prompt }],
     });
 
-    // 검색 횟수 카운트
     const searchesPerformed = response.content.filter(
       (b) => b.type === 'server_tool_use',
     ).length;
 
-    // 텍스트 블록에서 JSON 추출
     const textBlocks = response.content.filter((b) => b.type === 'text');
     const text = textBlocks.map((b) => 'text' in b ? b.text : '').join('');
 
-    // JSON 파싱
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
@@ -110,9 +109,36 @@ async function factCheckScript(
   }
 }
 
+// V2 패턴 → V1 패턴 변환 (프론트엔드 호환용)
+function toV1Pattern(decision: DirectorDecision): PatternSelection {
+  // V2 훅 → V1 훅 매핑
+  const hookMap: Record<string, PatternSelection['hook']> = {
+    benefit_shock: 'surprise',
+    debate_provoke: 'provocative',
+    sensory_nostalgia: 'surprise',
+    comparison_alt: 'comparison',
+    contrast: 'provocative',
+    problem_empathy: 'problem_empathy',
+    fomo_urgency: 'fomo_urgency',
+    price_shock: 'price_shock',
+  };
+  // V2 CTA → V1 CTA 매핑
+  const ctaMap: Record<string, PatternSelection['cta']> = {
+    none_debate: 'minimal',
+    soft: 'soft',
+    urgency: 'urgency',
+  };
+
+  return {
+    hook: hookMap[decision.hook] || 'provocative',
+    body: decision.body,
+    cta: ctaMap[decision.cta] || 'soft',
+  };
+}
+
 // 대본 결과 파싱
-function parseScriptOutput(content: string, pattern: PatternSelection): ScriptOutput {
-  // 제목 추출 - "제목 후보:" 또는 "## 제목 후보" 패턴 모두 처리
+function parseScriptOutput(content: string, pattern: PatternSelection, patternV2?: PatternSelectionV2): ScriptOutput {
+  // 제목 추출
   const titleSection = content.match(/제목\s*후보[^:\n]*[:：]\s*([\s\S]*?)(?=\n대본[:\s]|\n##\s*대본|$)/i);
   let titles: string[] = [];
   if (titleSection) {
@@ -122,7 +148,6 @@ function parseScriptOutput(content: string, pattern: PatternSelection): ScriptOu
       .filter(line => line.length > 3 && line.length < 60 && !line.startsWith('제목'));
   }
   if (titles.length === 0) {
-    // fallback: 번호 매겨진 줄 찾기
     const numbered = content.match(/^\d+\.\s+.{5,55}$/gm);
     if (numbered) {
       titles = numbered.slice(0, 3).map(l => l.replace(/^\d+\.\s+/, '').trim());
@@ -130,15 +155,14 @@ function parseScriptOutput(content: string, pattern: PatternSelection): ScriptOu
   }
   if (titles.length === 0) titles = ['제목 후보 1', '제목 후보 2', '제목 후보 3'];
 
-  // 대본 추출 - "대본:" 또는 "## 대본" 이후 ~ "타겟:" 또는 "패턴 선택 이유:" 전까지
+  // 대본 추출
   const scriptMatch = content.match(/(?:^|\n)(?:##\s*)?대본[:\s]\s*([\s\S]*?)(?=\n(?:##\s*)?타겟[:\s]|\n(?:##\s*)?패턴\s*선택\s*이유[:\s]|$)/i);
   let script = '';
   if (scriptMatch) {
     script = scriptMatch[1]
-      .replace(/^#+\s*/gm, '')  // ## 마크다운 헤더 제거
+      .replace(/^#+\s*/gm, '')
       .trim();
   } else {
-    // fallback: [0-4초] 패턴으로 시작하는 부분부터 추출
     const timeMatch = content.match(/(\[0-\d초\][\s\S]*?)(?=\n타겟|\n패턴\s*선택|$)/i);
     script = timeMatch ? timeMatch[1].trim() : content.trim();
   }
@@ -147,7 +171,7 @@ function parseScriptOutput(content: string, pattern: PatternSelection): ScriptOu
   const targetMatch = content.match(/(?:^|\n)(?:##\s*)?타겟[:\s]\s*([^\n]+)/i);
   const targetAudience = targetMatch ? targetMatch[1].trim() : '노트북 구매를 고민하는 20-30대';
 
-  // 패턴 선택 이유 추출 (대본에 포함하지 않고 별도 필드로)
+  // 패턴 선택 이유 추출
   const reasonMatch = content.match(/패턴\s*선택\s*이유[:\s]\s*([\s\S]*?)$/i);
   const patternReason = reasonMatch ? reasonMatch[1].trim() : '';
 
@@ -155,8 +179,9 @@ function parseScriptOutput(content: string, pattern: PatternSelection): ScriptOu
     titles: titles.slice(0, 3),
     script: patternReason ? `${script}\n\n---\n패턴 선택 이유: ${patternReason}` : script,
     pattern,
-    duration: 23,
+    duration: 19,
     targetAudience,
+    patternV2,
   };
 }
 
@@ -188,7 +213,7 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const { input, patternHistory, isRevision, previousScript, feedback } = body;
+  const { input, isRevision, previousScript, feedback } = body;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -201,12 +226,13 @@ export async function POST(request: NextRequest) {
         // Step 1: 가격 이미지 분석 (있으면)
         let priceData = '';
         if (input.priceImage) {
+          sendEvent({ type: 'start', phase: 'price' });
           priceData = await extractPriceFromImage(anthropic, input.priceImage);
           sendEvent({ type: 'price_extracted', priceData });
         }
 
         if (isRevision && previousScript && feedback) {
-          // 수정 요청
+          // ===== 수정 요청 (기존 로직 유지) =====
           const revisionPrompt = buildRevisionPrompt(previousScript, feedback, priceData);
 
           const revStream = anthropic.messages.stream({
@@ -224,43 +250,131 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          // 수정본에서는 기존 패턴 유지
           const output = parseScriptOutput(fullContent, { hook: 'problem_empathy', body: 'experience', cta: 'urgency' });
           sendEvent({ type: 'complete', output });
         } else {
-          // Step 2: 패턴 선택
-          const recentPatterns = (patternHistory || []).slice(-3);
-          const pattern = selectPattern(recentPatterns);
-          sendEvent({ type: 'pattern_selected', pattern });
+          // ===== 2-Phase 생성 흐름 =====
 
-          // Step 3: 프롬프트 조립 + 대본 생성
-          const prompt = buildScriptPrompt(pattern, priceData);
+          // Phase 1: 팀 분석 + 토론
+          sendEvent({ type: 'team_analysis_start', phase: 'team_analysis' });
 
+          const phase1Prompt = buildPhase1Prompt(priceData);
           const priceSection = priceData
-            ? `\n\n## 가격 추적 데이터 (내 사이트에서 추출한 실제 데이터 — 반드시 이 수치를 정확히 반영하세요)\n${priceData}`
+            ? `\n\n## 가격 추적 데이터\n${priceData}`
             : '';
-          const userMessage = `## 제품 정보\n${input.productInfo}\n\n## 리뷰 데이터\n${input.reviews}${priceSection}`;
+          const phase1UserMessage = `## 제품 정보\n${input.productInfo}\n\n## 리뷰 데이터\n${input.reviews}${priceSection}`;
 
-          const genStream = anthropic.messages.stream({
+          const phase1Stream = anthropic.messages.stream({
             model: 'claude-sonnet-4-20250514',
-            system: prompt,
-            messages: [{ role: 'user', content: userMessage }],
-            max_tokens: 2048,
+            system: phase1Prompt,
+            messages: [{ role: 'user', content: phase1UserMessage }],
+            max_tokens: 4096,
           });
 
-          let fullContent = '';
-          for await (const event of genStream) {
+          let phase1Content = '';
+          for await (const event of phase1Stream) {
             if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-              fullContent += event.delta.text;
-              sendEvent({ type: 'chunk', content: event.delta.text });
+              phase1Content += event.delta.text;
+              sendEvent({ type: 'team_analysis_chunk', content: event.delta.text });
             }
           }
 
-          // Step 4: 결과 파싱
-          const output = parseScriptOutput(fullContent, pattern);
+          // Phase 1 결과에서 디렉터 결정 파싱
+          let decision = parseDirectorDecision(phase1Content);
 
-          // Step 5: 팩트체크 (Sonnet 4.5 + Web Search)
-          sendEvent({ type: 'fact_check_start' });
+          if (!decision) {
+            // 파싱 실패 시 기본값 사용
+            decision = {
+              template: 'A',
+              hook: 'benefit_shock',
+              body: 'experience',
+              cta: 'none_debate',
+              forbiddenWords: [],
+              keywords: [],
+              priceNarrative: '가격 추적 데이터를 자연스럽게 활용',
+              finalHook: '',
+              productType: '',
+              wordPalette: [],
+            };
+          }
+
+          const patternV2: PatternSelectionV2 = {
+            hook: decision.hook,
+            body: decision.body,
+            cta: decision.cta,
+            template: decision.template,
+          };
+          const patternV1 = toV1Pattern(decision);
+
+          sendEvent({
+            type: 'team_analysis_complete',
+            directorDecision: decision,
+            patternV2,
+          });
+          sendEvent({ type: 'pattern_selected', pattern: patternV1, patternV2 });
+
+          // Phase 2: 대본 작성
+          const phase2Prompt = buildPhase2Prompt(decision, priceData);
+          const phase2UserMessage = `## 팀장 결정\n${JSON.stringify(decision, null, 2)}\n\n## 제품 정보\n${input.productInfo}\n\n## 리뷰 데이터\n${input.reviews}${priceSection}`;
+
+          const phase2Stream = anthropic.messages.stream({
+            model: 'claude-sonnet-4-20250514',
+            system: phase2Prompt,
+            messages: [{ role: 'user', content: phase2UserMessage }],
+            max_tokens: 2048,
+          });
+
+          let phase2Content = '';
+          for await (const event of phase2Stream) {
+            if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+              phase2Content += event.delta.text;
+              sendEvent({ type: 'chunk', content: event.delta.text, phase: 'script_generation' });
+            }
+          }
+
+          // 결과 파싱
+          let output = parseScriptOutput(phase2Content, patternV1, patternV2);
+          output.teamAnalysis = phase1Content;
+
+          // 단어 품질 검증
+          const wordCheckResult = validateScript(output.script, decision.forbiddenWords);
+          sendEvent({ type: 'word_check_result', wordCheckResult, phase: 'word_check' });
+
+          if (!wordCheckResult.passed) {
+            // 자동 수정 1회 시도
+            const correctionPrompt = buildWordCorrectionPrompt(phase2Content, wordCheckResult);
+
+            try {
+              const correctionResponse = await anthropic.messages.create({
+                model: 'claude-sonnet-4-20250514',
+                max_tokens: 2048,
+                messages: [{ role: 'user', content: correctionPrompt }],
+              });
+
+              const correctedText = correctionResponse.content
+                .filter(b => b.type === 'text')
+                .map(b => 'text' in b ? b.text : '')
+                .join('');
+
+              if (correctedText) {
+                output = parseScriptOutput(correctedText, patternV1, patternV2);
+                output.teamAnalysis = phase1Content;
+
+                // 재검증
+                const recheck = validateScript(output.script, decision.forbiddenWords);
+                output.wordCheckResult = recheck;
+                sendEvent({ type: 'word_check_result', wordCheckResult: recheck });
+              }
+            } catch (correctionError) {
+              console.error('Word correction error:', correctionError);
+              output.wordCheckResult = wordCheckResult;
+            }
+          } else {
+            output.wordCheckResult = wordCheckResult;
+          }
+
+          // 팩트체크 (Sonnet 4.5 + Web Search)
+          sendEvent({ type: 'fact_check_start', phase: 'fact_check' });
           const factCheckResult = await factCheckScript(
             anthropic,
             output.script,
